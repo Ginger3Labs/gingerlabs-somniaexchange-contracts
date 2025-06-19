@@ -8,6 +8,8 @@ require('dotenv').config();
 // Private key should be in .env file
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 
+console.log(`PRIVATE_KEY: ${PRIVATE_KEY}`);
+
 module.exports = {
    defaultNetwork: 'hardhat',
 
