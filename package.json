@@ -1,7 +1,6 @@
 {
   "name": "hardhat-project",
   "dependencies": {
-    "@nomiclabs/hardhat-ethers": "^2.0.1",
     "@openzeppelin/contracts": "^2.5.0",
     "@uniswap/lib": "^4.0.1-alpha",
     "@uniswap/v2-core": "^1.0.1",
@@ -9,7 +8,8 @@
     "ethers": "^6.15.0"
   },
   "devDependencies": {
-    "@nomiclabs/hardhat-etherscan": "^3.1.8",
+    "@nomicfoundation/hardhat-ethers": "^3.0.6",
+    "@nomicfoundation/hardhat-verify": "^2.0.8",
     "hardhat": "^2.26.0"
   },
   "overrides": {

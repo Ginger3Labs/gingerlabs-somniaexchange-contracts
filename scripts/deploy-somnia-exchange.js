@@ -9,63 +9,67 @@ async function deploy() {
    //Deploy WETH
    const wstt = await ethers.getContractFactory('WSTT');
    const wsttInstance = await wstt.deploy();
-   await wsttInstance.deployed();
-   console.log(`WSTT deployed to : ${wsttInstance.address}`);
+   await wsttInstance.waitForDeployment();
+   console.log(`WSTT deployed to : ${wsttInstance.target}`);
    await new Promise(resolve => setTimeout(resolve, 5000)); // 5 saniye bekle
 
    //Deploy Factory
    const factory = await ethers.getContractFactory('SomniaExchangeFactory');
    const factoryInstance = await factory.deploy(deployerAddress);
-   await factoryInstance.deployed();
-   console.log("Factory contract deployed to:", factoryInstance.address);
+   await factoryInstance.waitForDeployment();
+   console.log("Factory contract deployed to:", factoryInstance.target);
    await new Promise(resolve => setTimeout(resolve, 10000)); // 5 saniye bekle
 
    //Deploy Router passing Factory Address and WETH Address
    const router = await ethers.getContractFactory('SomniaExchangeRouter02');
    const routerInstance = await router.deploy(
-      factoryInstance.address,
-      wsttInstance.address
+      factoryInstance.target,
+      wsttInstance.target
    );
-   await routerInstance.deployed();
-   console.log("Router contract deployed to:", routerInstance.address);
+   await routerInstance.waitForDeployment();
+   console.log("Router contract deployed to:", routerInstance.target);
 
    //Deploy Multicall (needed for Interface)
    const multicall = await ethers.getContractFactory('Multicall');
    const multicallInstance = await multicall.deploy();
-   await multicallInstance.deployed();
-   console.log(`Multicall deployed to : ${multicallInstance.address}`);
+   await multicallInstance.waitForDeployment();
+   console.log(`Multicall deployed to : ${multicallInstance.target}`);
 
    //Deploy Tokens
    const tok1 = await ethers.getContractFactory('Token');
    const tok1Instance = await tok1.deploy('Token1', 'TOK1');
-   await tok1Instance.deployed();
-   console.log("Token1 contract deployed to:", tok1Instance.address);
+   await tok1Instance.waitForDeployment();
+   console.log("Token1 contract deployed to:", tok1Instance.target);
 
    const tok2 = await ethers.getContractFactory('Token');
    const tok2Instance = await tok2.deploy('Token2', 'TOK2');
-   await tok2Instance.deployed();
-   console.log("Token2 contract deployed to:", tok2Instance.address);
+   await tok2Instance.waitForDeployment();
+   console.log("Token2 contract deployed to:", tok2Instance.target);
 
    // Maximum approval amount
-   const maxApproval = ethers.constants.MaxUint256;
+   const maxApproval = ethers.MaxUint256;
 
    //Approve router on tokens with maximum amount
    console.log(`Approving Router on Token1`);
-   await tok1Instance.approve(routerInstance.address, maxApproval, {
+   await tok1Instance.approve(routerInstance.target, maxApproval, {
       gasLimit: 100000
    });
    console.log(`Approving Router on Token2`);
-   await tok2Instance.approve(routerInstance.address, maxApproval, {
+   await tok2Instance.approve(routerInstance.target, maxApproval, {
       gasLimit: 100000
    });
 
    //Create Pair with Factory and Get Address
-   await factoryInstance.createPair(tok1Instance.address, tok2Instance.address, {
-      gasLimit: 3000000
+   console.log("Creating pair...");
+   const createPairTx = await factoryInstance.createPair(tok1Instance.target, tok2Instance.target, {
+      gasLimit: 8000000
    });
+   await createPairTx.wait(); // Wait for the transaction to be mined
+   console.log("Pair created.");
+
    const lpAddress = await factoryInstance.getPair(
-      tok1Instance.address,
-      tok2Instance.address
+      tok1Instance.target,
+      tok2Instance.target
    );
    console.log("Liquidity added successfully");
    console.log("Pair address:", lpAddress);
@@ -75,15 +79,15 @@ async function deploy() {
    const deadline = blockTime + 1200; // 20 minutes in seconds
 
    // Define amounts
-   const amount = ethers.utils.parseEther('1.0'); // 1 token
-   const minAmount = ethers.utils.parseEther('0.1'); // 0.1 token minimum
+   const amount = ethers.parseEther('1.0'); // 1 token
+   const minAmount = ethers.parseEther('0.1'); // 0.1 token minimum
 
    //Add Liquidity
    console.log(`Adding Liquidity...`);
    try {
       const tx = await routerInstance.addLiquidity(
-         tok1Instance.address,
-         tok2Instance.address,
+         tok1Instance.target,
+         tok2Instance.target,
          amount,
          amount,
          minAmount,
@@ -92,7 +96,7 @@ async function deploy() {
          deadline,
          {
             gasLimit: 5000000,
-            gasPrice: await ethers.provider.getGasPrice()
+            // gasPrice is handled by ethers v6 automatically
          }
       );
       await tx.wait();
@@ -104,12 +108,12 @@ async function deploy() {
 
    // Save deployed addresses
    const deployedAddresses = {
-      WETH: wsttInstance.address,
-      Factory: factoryInstance.address,
-      Router: routerInstance.address,
-      Multicall: multicallInstance.address,
-      Token1: tok1Instance.address,
-      Token2: tok2Instance.address,
+      WETH: wsttInstance.target,
+      Factory: factoryInstance.target,
+      Router: routerInstance.target,
+      Multicall: multicallInstance.target,
+      Token1: tok1Instance.target,
+      Token2: tok2Instance.target,
       LiquidityPool: lpAddress
    };
 

@@ -2,8 +2,8 @@
  * @type import('hardhat/config').HardhatUserConfig
  */
 
-require('@nomiclabs/hardhat-ethers');
-require("@nomiclabs/hardhat-etherscan");
+require('@nomicfoundation/hardhat-ethers');
+require("@nomicfoundation/hardhat-verify");
 require('dotenv').config();
 
 // Private key should be in .env file
@@ -46,19 +46,19 @@ module.exports = {
    },
    etherscan: {
       apiKey: {
-        'somnia-testnet': 'empty' // As per documentation
+         'somnia-testnet': 'empty' // As per documentation
       },
       customChains: [
-        {
-          network: "somnia-testnet",
-          chainId: 50312,
-          urls: {
-            apiURL: "https://somnia.w3us.site/api",
-            browserURL: "https://somnia.w3us.site"
-          }
-        }
+         {
+            network: "somnia-testnet",
+            chainId: 50312,
+            urls: {
+               apiURL: "https://somnia.w3us.site/api",
+               browserURL: "https://somnia.w3us.site"
+            }
+         }
       ]
-    },
+   },
    paths: {
       sources: './contracts',
       cache: './cache',
