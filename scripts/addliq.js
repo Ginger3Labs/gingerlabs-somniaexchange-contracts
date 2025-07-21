@@ -8,7 +8,7 @@ async function addNewLiquidity() {
     [account] = await ethers.getSigners();
     const deployerAddress = account.address;
 
-    const routerInstance = await ethers.getContractAt('UniswapV2Router02', ROUTER_ADDRESS);
+    const routerInstance = await ethers.getContractAt('SomniaExchangeRouter02', ROUTER_ADDRESS);
     const token1Instance = await ethers.getContractAt('Token', TOKEN1_ADDRESS);
     const token2Instance = await ethers.getContractAt('Token', TOKEN2_ADDRESS);
 

@@ -1,9 +1,9 @@
 const { ethers } = require("hardhat");
 
 async function main() {
-    const UniswapV2Pair = await ethers.getContractFactory("UniswapV2Pair");
+    const SomniaExchangePair = await ethers.getContractFactory("SomniaExchangePair");
 
-    const initCodeHash = ethers.utils.keccak256(UniswapV2Pair.bytecode);
+    const initCodeHash = ethers.utils.keccak256(SomniaExchangePair.bytecode);
 
     console.log(`INIT_CODE_HASH: ${initCodeHash}`);
 }

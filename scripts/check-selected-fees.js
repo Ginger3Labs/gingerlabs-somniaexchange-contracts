@@ -11,7 +11,7 @@ const PAIRS_TO_CHECK = [
 
 async function getTokenInfo(tokenAddress) {
     try {
-        const token = await ethers.getContractAt("UniswapV2ERC20", tokenAddress);
+        const token = await ethers.getContractAt("SomniaExchangeERC20", tokenAddress);
         let symbol = "???";
         let decimals = 18;
 
@@ -43,7 +43,7 @@ async function checkSelectedPairFees() {
         console.log(`Kontrol eden adres: ${account.address}\n`);
 
         // Factory kontratına bağlan
-        const factory = await ethers.getContractAt("UniswapV2Factory", FACTORY_ADDRESS);
+        const factory = await ethers.getContractAt("SomniaExchangeFactory", FACTORY_ADDRESS);
 
         // feeTo adresini al
         const feeToAddress = await factory.feeTo();
@@ -64,7 +64,7 @@ async function checkSelectedPairFees() {
             const pairAddress = PAIRS_TO_CHECK[i];
 
             try {
-                const pair = await ethers.getContractAt("UniswapV2Pair", pairAddress);
+                const pair = await ethers.getContractAt("SomniaExchangePair", pairAddress);
 
                 // Token bilgilerini al
                 const token0Address = await pair.token0();

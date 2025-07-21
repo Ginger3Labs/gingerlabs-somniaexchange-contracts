@@ -14,7 +14,7 @@ async function calculateLPProfit() {
         const INITIAL_TOKEN1_INVESTED = ethers.utils.parseEther("1.0"); // İlk yatırdığınız token1
 
         // Pair kontratına bağlan
-        const pair = await ethers.getContractAt("UniswapV2Pair", PAIR_ADDRESS);
+        const pair = await ethers.getContractAt("SomniaExchangePair", PAIR_ADDRESS);
 
         // Mevcut bilgileri al
         const currentLPBalance = await pair.balanceOf(account.address);

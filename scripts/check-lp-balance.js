@@ -13,7 +13,7 @@ async function checkLPBalance() {
         const TOKEN2_ADDRESS = "YOUR_TOKEN2_ADDRESS"; // Token2 adresi
 
         // Factory kontratına bağlan
-        const factory = await ethers.getContractAt("UniswapV2Factory", FACTORY_ADDRESS);
+        const factory = await ethers.getContractAt("SomniaExchangeFactory", FACTORY_ADDRESS);
 
         // Tüm pair'ları kontrol et
         const pairCount = await factory.allPairsLength();
@@ -27,7 +27,7 @@ async function checkLPBalance() {
 
             try {
                 // Pair kontratına bağlan
-                const pair = await ethers.getContractAt("UniswapV2Pair", pairAddress);
+                const pair = await ethers.getContractAt("SomniaExchangePair", pairAddress);
 
                 // Token bilgilerini al
                 const token0 = await pair.token0();

@@ -80,7 +80,7 @@ async function addNewBatch(batchData, newBatch, pairAddress) {
     console.log("=== YENİ BATCH EKLENİYOR ===");
 
     // Pair kontratından mevcut bilgileri al
-    const pair = await ethers.getContractAt("UniswapV2Pair", pairAddress);
+    const pair = await ethers.getContractAt("SomniaExchangePair", pairAddress);
     const reserves = await pair.getReserves();
     const totalSupply = await pair.totalSupply();
 
@@ -166,7 +166,7 @@ async function calculateBatchProfit(batchData, pairAddress) {
     }
 
     // Mevcut pool durumunu al
-    const pair = await ethers.getContractAt("UniswapV2Pair", pairAddress);
+    const pair = await ethers.getContractAt("SomniaExchangePair", pairAddress);
     const [currentLPBalance, totalSupply, reserves] = await Promise.all([
         pair.balanceOf((await ethers.getSigners())[0].address),
         pair.totalSupply(),

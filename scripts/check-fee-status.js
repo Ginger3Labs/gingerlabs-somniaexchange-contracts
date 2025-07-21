@@ -10,7 +10,7 @@ async function checkFeeStatus() {
         const FACTORY_ADDRESS = "0x31015A978c5815EdE29D0F969a17e116BC1866B1".toLowerCase(); // ← Bu adresi güncelleyin!
 
         // Factory kontratına bağlan
-        const factory = await ethers.getContractAt("UniswapV2Factory", FACTORY_ADDRESS);
+        const factory = await ethers.getContractAt("SomniaExchangeFactory", FACTORY_ADDRESS);
 
         // feeTo adresini al
         const feeToAddress = await factory.feeTo();

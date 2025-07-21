@@ -22,7 +22,7 @@ async function checkCollectedFees() {
         console.log(`Kontrol eden adres: ${account.address}\n`);
 
         // Factory kontratına bağlan
-        const factory = await ethers.getContractAt("UniswapV2Factory", FACTORY_ADDRESS);
+        const factory = await ethers.getContractAt("SomniaExchangeFactory", FACTORY_ADDRESS);
 
         // feeTo adresini al
         const feeToAddress = await factory.feeTo();
@@ -44,7 +44,7 @@ async function checkCollectedFees() {
 
         for (let i = 0; i < allPairsLength; i++) {
             const pairAddress = await factory.allPairs(i);
-            const pair = await ethers.getContractAt("UniswapV2Pair", pairAddress);
+            const pair = await ethers.getContractAt("SomniaExchangePair", pairAddress);
 
             // Token bilgilerini al
             const token0Address = await pair.token0();

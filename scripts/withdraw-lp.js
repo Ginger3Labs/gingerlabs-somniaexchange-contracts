@@ -14,8 +14,8 @@ async function withdrawLP() {
         const PERCENTAGE = 50; // Eğer partial ise, %kaç çekmek istiyorsunuz
 
         // Router ve Pair kontratlarına bağlan
-        const router = await ethers.getContractAt("UniswapV2Router02", ROUTER_ADDRESS);
-        const pair = await ethers.getContractAt("UniswapV2Pair", PAIR_ADDRESS);
+        const router = await ethers.getContractAt("SomniaExchangeRouter02", ROUTER_ADDRESS);
+        const pair = await ethers.getContractAt("SomniaExchangePair", PAIR_ADDRESS);
 
         // LP token bilgilerini al
         const lpBalance = await pair.balanceOf(account.address);

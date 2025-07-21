@@ -15,7 +15,7 @@ async function manageFee() {
         const FEE_RECEIVER_ADDRESS = ethers.utils.getAddress("0xD8976d7D8F18e536827113dc3707c55f15FC8915"); // ← Komisyon alacak adres
         console.log(`FEE_RECEIVER_ADDRESS: ${FEE_RECEIVER_ADDRESS}`);
         // Factory kontratına bağlan
-        const factory = await ethers.getContractAt("UniswapV2Factory", FACTORY_ADDRESS);
+        const factory = await ethers.getContractAt("SomniaExchangeFactory", FACTORY_ADDRESS);
 
         // Mevcut durumu kontrol et
         const currentFeeTo = await factory.feeTo();
