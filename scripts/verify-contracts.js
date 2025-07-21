@@ -2,15 +2,25 @@ const { run } = require("hardhat");
 const { ethers } = require("ethers"); // Import ethers directly
 require('dotenv').config();
 
+/*
 
+Deploying contracts using 0x0C1e323f3e78743458C635967e2Ee80fbd2030fC
+WSTT deployed to : 0x5Bf3883758890eff0F86B14eCdf658485A9E9101
+Factory contract deployed to: 0x2713FED1D9175C052857F6D0cBC2489A610124b7
+Router contract deployed to: 0xE9ebBD400aA2872d9013de40396C6486B561E992
+Multicall deployed to : 0xf213dad4ba6D6bf7A7aa1D8ad86a12481C212999
+Token1 contract deployed to: 0x388fD89190b7D1193890954CE0c0604648Ec4261
+Token2 contract deployed to: 0x493f980848a2ccdB4425757619e7CA1335dc6933
+
+*/
 async function main() {
     const contractAddresses = {
-        wstt: "0xd9aEcb91d54D60fc3fD8e7C1C1D58073186440BD",
-        factory: "0xC5BC511d77dB2A54ef85A57C406E21c3A7f54C17",
-        router: "0x6E4b7201180Dfab02136a39c54f5DAb714610486",
-        multicall: "0x2e3B3874B11356071806dB5944a0b3494f3B3D52",
-        token1: "0xD0F0d1Fd692e5f65E51a8f89c21302f6C10d9148",
-        token2: "0x1149555ADa1D9d312e54b6Bf3DD7B1D6C08086ff"
+        wstt: "0x5Bf3883758890eff0F86B14eCdf658485A9E9101",
+        factory: "0x2713FED1D9175C052857F6D0cBC2489A610124b7",
+        router: "0xE9ebBD400aA2872d9013de40396C6486B561E992",
+        multicall: "0xf213dad4ba6D6bf7A7aa1D8ad86a12481C212999",
+        token1: "0x388fD89190b7D1193890954CE0c0604648Ec4261",
+        token2: "0x493f980848a2ccdB4425757619e7CA1335dc6933"
     };
 
     // Get deployer address from private key to avoid ethers.getSigners()
@@ -41,7 +51,7 @@ async function main() {
     // NOTE: Constructor arguments for generic tokens might need to be adjusted
     // Assuming they were deployed with standard names/symbols for now.
     await verifyContract("Token", contractAddresses.token1, ["Token1", "TKN1"]);
-    
+
     // Verify Token2
     await verifyContract("Token", contractAddresses.token2, ["Token2", "TKN2"]);
 

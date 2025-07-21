@@ -21,7 +21,7 @@ library SomniaExchangeLibrary {
                 hex'ff',
                 factory,
                 keccak256(abi.encodePacked(token0, token1)),
-                hex'01429e880a7972ebfbba904a5bbe32a816e78273e4b38ffa6bdeaebce8adba7c' // init code hash
+                hex'ced114f80f8ee6a3e5f70b31d4e21666320e9f115aaf81dcbea5c0f69fea1298' // init code hash
             ))));
     }
 

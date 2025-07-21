@@ -16,7 +16,7 @@ module.exports = {
    networks: {
       hardhat: {},
       'somnia-testnet': {
-         url: "https://dream-rpc.somnia.network",
+         url: "https://enterprise.onerpc.com/somnia_testnet?apikey=Ku3gV1hlxVE3wPUH5aeLC126NpZfO2Sg",
          accounts: [PRIVATE_KEY],
          chainId: 50312,
          timeout: 60000,

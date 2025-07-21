@@ -1,46 +1,118 @@
 const { ethers } = require('hardhat');
 
-const ROUTER_ADDRESS = "0x585751cBCD7F7eC212Cf3C8E4Bed52a021d39E7d";
-const TOKEN1_ADDRESS = "0xF205dA83586C26b9E4510dE554122616338b5D0f";
-const TOKEN2_ADDRESS = "0xce885b4f5b4fFfa0e2272AB937C2e192EDAa6F15";
+// New configuration for Token-to-Token liquidity
+const ROUTER_ADDRESS = "0xE9ebBD400aA2872d9013de40396C6486B561E992";
+const TOKEN1_ADDRESS = "0x388fD89190b7D1193890954CE0c0604648Ec4261";
+const TOKEN2_ADDRESS = "0x493f980848a2ccdB4425757619e7CA1335dc6933";
+const LIQUIDITY_TOKEN1_AMOUNT = "10"; // Amount of TOKEN1 to add
+const LIQUIDITY_TOKEN2_AMOUNT = "10"; // Amount of TOKEN2 to add
 
-async function addNewLiquidity() {
-    [account] = await ethers.getSigners();
-    const deployerAddress = account.address;
+async function main() {
+    const [deployer] = await ethers.getSigners();
+    console.log(`Using account: ${deployer.address}`);
 
-    const routerInstance = await ethers.getContractAt('SomniaExchangeRouter02', ROUTER_ADDRESS);
-    const token1Instance = await ethers.getContractAt('Token', TOKEN1_ADDRESS);
-    const token2Instance = await ethers.getContractAt('Token', TOKEN2_ADDRESS);
+    // Get contract instances
+    const router = await ethers.getContractAt('ISomniaExchangeRouter02', ROUTER_ADDRESS);
+    const token1 = await ethers.getContractAt('Token', TOKEN1_ADDRESS);
+    const token2 = await ethers.getContractAt('Token', TOKEN2_ADDRESS);
 
-    console.log(`🔄 Approving Router for NewToken1...`);
-    await token1Instance.approve(ROUTER_ADDRESS, ethers.constants.MaxUint256);
+    // Get factory address from router and create factory contract instance
+    const factoryAddress = await router.factory();
+    const factory = await ethers.getContractAt('ISomniaExchangeFactory', factoryAddress);
+    console.log(`Factory address: ${factoryAddress}`);
 
-    console.log(`🔄 Approving Router for NewToken2...`);
-    await token2Instance.approve(ROUTER_ADDRESS, ethers.constants.MaxUint256);
+    // Get pair address for TOKEN1 and TOKEN2, or create it if it doesn't exist
+    console.log(`Fetching pair for ${TOKEN1_ADDRESS} (TOKEN1) and ${TOKEN2_ADDRESS} (TOKEN2)...`);
+    let pairAddress = await factory.getPair(TOKEN1_ADDRESS, TOKEN2_ADDRESS);
+    console.log(`Initial pair address: ${pairAddress}`);
 
-    const blockTime = (await ethers.provider.getBlock("latest")).timestamp;
+    if (pairAddress === '0x0000000000000000000000000000000000000000') {
+        console.log("Pair does not exist. Creating it now...");
+        const createPairTx = await factory.createPair(TOKEN1_ADDRESS, TOKEN2_ADDRESS);
+        await createPairTx.wait();
+        console.log("Pair created successfully.");
+        
+        // Fetch the new pair address
+        pairAddress = await factory.getPair(TOKEN1_ADDRESS, TOKEN2_ADDRESS);
+        console.log(`New pair address: ${pairAddress}`);
+    }
 
-    console.log(`🚀 Adding Liquidity for NewToken1 & NewToken2...`);
-    await routerInstance.addLiquidity(
-        TOKEN1_ADDRESS,
-        TOKEN2_ADDRESS,
-        ethers.utils.parseUnits("1000", 18), // Token1 Amount
-        ethers.utils.parseUnits("1000", 18), // Token2 Amount
-        0, // Min Token1 (Slippage zero)
-        0, // Min Token2 (Slippage zero)
-        deployerAddress,
-        blockTime + 100,
-        { gasLimit: 5000000 }
-    );
+    // Get pair contract instance
+    const pair = await ethers.getContractAt('ISomniaExchangePair', pairAddress);
 
-    console.log("Liquidity added successfully");
-    console.log("Pair address:", pairAddress);
+    // Log reserves before adding liquidity
+    const reservesBefore = await pair.getReserves();
+    // Uniswap sorts tokens, so we need to check the order
+    const token0Address = await pair.token0();
+    if (token0Address === TOKEN1_ADDRESS) {
+        console.log(`Reserves before: Token1=${ethers.formatUnits(reservesBefore[0], 18)}, Token2=${ethers.formatUnits(reservesBefore[1], 18)}`);
+    } else {
+        console.log(`Reserves before: Token2=${ethers.formatUnits(reservesBefore[0], 18)}, Token1=${ethers.formatUnits(reservesBefore[1], 18)}`);
+    }
+
+    // Approve both tokens for the router
+    console.log('Approving TOKEN1 for the router...');
+    await (await token1.approve(ROUTER_ADDRESS, ethers.parseUnits(LIQUIDITY_TOKEN1_AMOUNT, 18))).wait();
+    console.log('TOKEN1 approved.');
+
+    console.log('Approving TOKEN2 for the router...');
+    await (await token2.approve(ROUTER_ADDRESS, ethers.parseUnits(LIQUIDITY_TOKEN2_AMOUNT, 18))).wait();
+    console.log('TOKEN2 approved.');
+
+    // Check balances before proceeding
+    const token1Balance = await token1.balanceOf(deployer.address);
+    const token2Balance = await token2.balanceOf(deployer.address);
+    console.log(`User's TOKEN1 balance: ${ethers.formatUnits(token1Balance, 18)}`);
+    console.log(`User's TOKEN2 balance: ${ethers.formatUnits(token2Balance, 18)}`);
+
+    const requiredToken1 = ethers.parseUnits(LIQUIDITY_TOKEN1_AMOUNT, 18);
+    const requiredToken2 = ethers.parseUnits(LIQUIDITY_TOKEN2_AMOUNT, 18);
+
+    if (token1Balance < requiredToken1 || token2Balance < requiredToken2) {
+        console.error("Error: Insufficient token balance to add liquidity.");
+        process.exit(1);
+    }
+
+    // Set deadline
+    const deadline = Math.floor(Date.now() / 1000) + 60 * 10; // 10 minutes from now
+
+    console.log(`Adding liquidity for TOKEN1 and TOKEN2...`);
+    
+    try {
+        // Add liquidity for Token-Token pair
+        const tx = await router.addLiquidity(
+            TOKEN1_ADDRESS,
+            TOKEN2_ADDRESS,
+            ethers.parseUnits(LIQUIDITY_TOKEN1_AMOUNT, 18),
+            ethers.parseUnits(LIQUIDITY_TOKEN2_AMOUNT, 18),
+            0, // amountTokenMin - setting to 0 for simplicity
+            0, // amountETHMin - setting to 0 for simplicity
+            deployer.address,
+            deadline
+        );
+
+        console.log('Transaction sent, waiting for confirmation...');
+        const receipt = await tx.wait();
+        console.log(`Liquidity added successfully!`);
+        console.log(`Transaction hash: ${receipt.hash}`);
+
+        // Log reserves after adding liquidity
+        const newReserves = await pair.getReserves();
+        if (token0Address === TOKEN1_ADDRESS) {
+            console.log(`Reserves after:  Token1=${ethers.formatUnits(newReserves[0], 18)}, Token2=${ethers.formatUnits(newReserves[1], 18)}`);
+        } else {
+            console.log(`Reserves after:  Token2=${ethers.formatUnits(newReserves[0], 18)}, Token1=${ethers.formatUnits(newReserves[1], 18)}`);
+        }
+
+    } catch (error) {
+        console.error('Error adding liquidity:');
+        console.error(error);
+    }
 }
 
-addNewLiquidity()
+main()
     .then(() => process.exit(0))
     .catch((error) => {
-        console.error("❌ Error:", error);
+        console.error(error);
         process.exit(1);
     });
-

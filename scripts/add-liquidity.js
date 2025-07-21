@@ -20,28 +20,37 @@ async function main() {
     const token2Instance = await ethers.getContractAt("Token", contractAddresses.token2);
     const factoryInstance = await ethers.getContractAt("SomniaExchangeFactory", contractAddresses.factory);
 
-    const token1Amount = ethers.utils.parseEther("100");
-    const token2Amount = ethers.utils.parseEther("100");
+    const token1Amount = ethers.parseEther("100");
+    const token2Amount = ethers.parseEther("100");
 
     // Check balances before proceeding
     const token1Balance = await token1Instance.balanceOf(deployer.address);
     const token2Balance = await token2Instance.balanceOf(deployer.address);
-    console.log(`Token1 Balance: ${ethers.utils.formatEther(token1Balance)}`);
-    console.log(`Token2 Balance: ${ethers.utils.formatEther(token2Balance)}`);
+    console.log(`Token1 Balance: ${ethers.formatEther(token1Balance)}`);
+    console.log(`Token2 Balance: ${ethers.formatEther(token2Balance)}`);
 
-    if (token1Balance.lt(token1Amount) || token2Balance.lt(token2Amount)) {
+  /*   if (token1Balance.lt(token1Amount) || token2Balance.lt(token2Amount)) {
         console.error("Insufficient token balance to add liquidity.");
         return;
-    }
+    } */
 
     // Approve Router to spend tokens
+
+    console.log("Checking router address...");
+    try {
+        const routerAddress = await routerInstance.getAddress();
+        console.log("Router address from getAddress():", routerAddress);
+    } catch (e) {
+        console.error("Could not get router address:", e);
+    }
+
     console.log("Approving Router on Token1...");
-    const approve1Tx = await token1Instance.approve(routerInstance.address, token1Amount);
+    const approve1Tx = await token1Instance.approve(await routerInstance.getAddress(), token1Amount);
     await approve1Tx.wait();
     console.log("Token1 approved.");
 
     console.log("Approving Router on Token2...");
-    const approve2Tx = await token2Instance.approve(routerInstance.address, token2Amount);
+    const approve2Tx = await token2Instance.approve(await routerInstance.getAddress(), token2Amount);
     await approve2Tx.wait();
     console.log("Token2 approved.");
 
@@ -50,21 +59,18 @@ async function main() {
     try {
         const deadline = Math.floor(Date.now() / 1000) + (60 * 60); // 60 minutes from now
         const addLiquidityTx = await routerInstance.addLiquidity(
-            token1Instance.address,
-            token2Instance.address,
-            token1Amount,
+                await token1Instance.getAddress(),
+                await token2Instance.getAddress(),
+                token1Amount,
             token2Amount,
             0, // amountTokenAMin
             0, // amountTokenBMin
             deployer.address,
             deadline,
-            { gasLimit: 10000000 } // Increased gas limit
-        );
+        { gasLimit: 5000000 }        );
         const receipt = await addLiquidityTx.wait();
         console.log("Liquidity added successfully. Transaction hash:", receipt.transactionHash);
 
-        const pairAddress = await factoryInstance.getPair(token1Instance.address, token2Instance.address);
-        console.log("Pair address:", pairAddress);
 
     } catch (error) {
         console.error("Error adding liquidity:", error.message);
