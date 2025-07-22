@@ -2,23 +2,26 @@ const hre = require("hardhat");
 require('dotenv').config();
 
 async function main() {
-    // Deploy Token contract
-    const Token = await hre.ethers.getContractFactory("Token");
-    const token = await Token.deploy();
-    await token.deployed();
-    console.log("Token deployed to:", token.address);
+    const [deployer] = await hre.ethers.getSigners();
+    console.log("Deploying contracts with the account:", deployer.address);
 
     // Deploy WETH contract
     const WETH = await hre.ethers.getContractFactory("WETH");
     const weth = await WETH.deploy();
-    await weth.deployed();
-    console.log("WETH deployed to:", weth.address);
+    await weth.waitForDeployment();
+    console.log("WETH deployed to:", weth.target);
 
-    // Deploy Multicall contract
-    const Multicall = await hre.ethers.getContractFactory("Multicall");
-    const multicall = await Multicall.deploy();
-    await multicall.deployed();
-    console.log("Multicall deployed to:", multicall.address);
+    // Deploy Factory
+    const Factory = await hre.ethers.getContractFactory("SomniaExchangeFactory");
+    const factory = await Factory.deploy(deployer.address);
+    await factory.waitForDeployment();
+    console.log("Factory deployed to:", factory.target);
+
+    // Deploy Router
+    const Router = await hre.ethers.getContractFactory("SomniaExchangeRouter02");
+    const router = await Router.deploy(factory.target, weth.target);
+    await router.waitForDeployment();
+    console.log("Router deployed to:", router.target);
 }
 
 main()
@@ -26,4 +29,4 @@ main()
     .catch((error) => {
         console.error(error);
         process.exit(1);
-    }); 
+    });
