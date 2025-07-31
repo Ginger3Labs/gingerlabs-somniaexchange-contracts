@@ -52,7 +52,8 @@ module.exports = {
    },
    etherscan: {
       apiKey: {
-         'somnia-testnet': 'empty' // As per documentation
+         'somnia-testnet': 'empty', // As per documentation
+         'somnia-mainnet': 'empty' // As per documentation
       },
       customChains: [
          {
@@ -61,6 +62,14 @@ module.exports = {
             urls: {
                apiURL: "https://somnia.w3us.site/api",
                browserURL: "https://somnia.w3us.site"
+            }
+         },
+         {
+            network: "somnia-mainnet",
+            chainId: 5031,
+            urls: {
+               apiURL: "https://mainnet.somnia.w3us.site/api",
+               browserURL: "https://mainnet.somnia.w3us.site"
             }
          }
       ]

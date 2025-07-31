@@ -34,7 +34,7 @@ async function main() {
     console.log("Starting verification process...");
 
     // Verify WSOMI
-    await verifyContract("WSOMI", contractAddresses.wstt, []);
+    await verifyContract("WSOMI", contractAddresses.wstt, [], "contracts/WSOMI.sol:WSOMI");
 
     // Verify Factory
     await verifyContract("SomniaExchangeFactory", contractAddresses.factory, [deployerAddress]);
@@ -56,13 +56,17 @@ async function main() {
     console.log("Verification process finished.");
 }
 
-async function verifyContract(contractName, address, constructorArguments) {
+async function verifyContract(contractName, address, constructorArguments, contractPath) {
     console.log(`Verifying ${contractName} at ${address}...`);
     try {
-        await run("verify:verify", {
+        const verificationArgs = {
             address: address,
             constructorArguments: constructorArguments,
-        });
+        };
+        if (contractPath) {
+            verificationArgs.contract = contractPath;
+        }
+        await run("verify:verify", verificationArgs);
         console.log(`Successfully verified ${contractName}`);
     } catch (error) {
         if (error.message.toLowerCase().includes("already verified")) {
