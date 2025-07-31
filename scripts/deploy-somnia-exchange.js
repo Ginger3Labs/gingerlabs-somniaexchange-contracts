@@ -7,10 +7,10 @@ async function deploy() {
    console.log(`Deploying contracts using ${deployerAddress}`);
 
    //Deploy WETH
-   const wstt = await ethers.getContractFactory('WSTT');
+   const wstt = await ethers.getContractFactory('WSOMI');
    const wsttInstance = await wstt.deploy();
    await wsttInstance.waitForDeployment();
-   console.log(`WSTT deployed to : ${wsttInstance.target}`);
+   console.log(`WSOMI deployed to : ${wsttInstance.target}`);
    await new Promise(resolve => setTimeout(resolve, 5000)); // 5 saniye bekle
 
    //Deploy Factory
@@ -36,7 +36,7 @@ async function deploy() {
    console.log(`Multicall deployed to : ${multicallInstance.target}`);
 
    //Deploy Tokens
-   const tok1 = await ethers.getContractFactory('Token');
+/*    const tok1 = await ethers.getContractFactory('Token');
    const tok1Instance = await tok1.deploy('Token1', 'TOK1');
    await tok1Instance.waitForDeployment();
    console.log("Token1 contract deployed to:", tok1Instance.target);
@@ -44,13 +44,13 @@ async function deploy() {
    const tok2 = await ethers.getContractFactory('Token');
    const tok2Instance = await tok2.deploy('Token2', 'TOK2');
    await tok2Instance.waitForDeployment();
-   console.log("Token2 contract deployed to:", tok2Instance.target);
+   console.log("Token2 contract deployed to:", tok2Instance.target); */
 
    // Maximum approval amount
    const maxApproval = ethers.MaxUint256;
 
    //Approve router on tokens with maximum amount
-   console.log(`Approving Router on Token1`);
+  /*  console.log(`Approving Router on Token1`);
    await tok1Instance.approve(routerInstance.target, maxApproval, {
       gasLimit: 100000
    });
@@ -72,7 +72,7 @@ async function deploy() {
       tok2Instance.target
    );
    console.log("Liquidity added successfully");
-   console.log("Pair address:", lpAddress);
+   console.log("Pair address:", lpAddress); */
 
    // Get Block TimeStamp and add 20 minutes for deadline
    const blockTime = (await ethers.provider.getBlock()).timestamp;
@@ -83,7 +83,7 @@ async function deploy() {
    const minAmount = ethers.parseEther('0.1'); // 0.1 token minimum
 
    //Add Liquidity
-   console.log(`Adding Liquidity...`);
+/*    console.log(`Adding Liquidity...`);
    try {
       const tx = await routerInstance.addLiquidity(
          tok1Instance.target,
@@ -104,7 +104,7 @@ async function deploy() {
    } catch (error) {
       console.error('Error adding liquidity:', error.message);
       throw error;
-   }
+   } */
 
    // Save deployed addresses
    const deployedAddresses = {
@@ -112,9 +112,6 @@ async function deploy() {
       Factory: factoryInstance.target,
       Router: routerInstance.target,
       Multicall: multicallInstance.target,
-      Token1: tok1Instance.target,
-      Token2: tok2Instance.target,
-      LiquidityPool: lpAddress
    };
 
    console.log('\nDeployed Addresses:', deployedAddresses);

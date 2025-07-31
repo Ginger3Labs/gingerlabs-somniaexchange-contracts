@@ -5,7 +5,7 @@ require('dotenv').config();
 /*
 
 Deploying contracts using 0x0C1e323f3e78743458C635967e2Ee80fbd2030fC
-WSTT deployed to : 0x5Bf3883758890eff0F86B14eCdf658485A9E9101
+WSOMI deployed to : 0x5Bf3883758890eff0F86B14eCdf658485A9E9101
 Factory contract deployed to: 0x2713FED1D9175C052857F6D0cBC2489A610124b7
 Router contract deployed to: 0xE9ebBD400aA2872d9013de40396C6486B561E992
 Multicall deployed to : 0xf213dad4ba6D6bf7A7aa1D8ad86a12481C212999
@@ -35,8 +35,8 @@ async function main() {
 
     console.log("Starting verification process...");
 
-    // Verify WSTT
-    await verifyContract("WSTT", contractAddresses.wstt, []);
+    // Verify WSOMI
+    await verifyContract("WSOMI", contractAddresses.wstt, []);
 
     // Verify Factory
     await verifyContract("SomniaExchangeFactory", contractAddresses.factory, [deployerAddress]);

@@ -21,6 +21,12 @@ module.exports = {
          chainId: 50312,
          timeout: 60000,
       },
+      'somnia-mainnet': {
+         url: "https://api.infra.mainnet.somnia.network/",
+         accounts: [PRIVATE_KEY],
+         chainId: 5031,
+         timeout: 60000,
+      },
    },
    solidity: {
       compilers: [

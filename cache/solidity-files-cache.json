@@ -1897,41 +1897,6 @@
         "WETH"
       ]
     },
-    "/Users/novem/Documents/FlutterProjects/uniswap-contracts-cypherium-main/contracts/WSTT.sol": {
-      "lastModificationDate": 1753094877644,
-      "contentHash": "2af14f8ed63735b7a117b2e050322398",
-      "sourceName": "contracts/WSTT.sol",
-      "solcConfig": {
-        "version": "0.6.6",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [],
-      "versionPragmas": [
-        "=0.6.6"
-      ],
-      "artifacts": [
-        "WSTT"
-      ]
-    },
     "/Users/novem/Documents/FlutterProjects/uniswap-contracts-cypherium-main/node_modules/.pnpm/@openzeppelin+contracts@2.5.1/node_modules/@openzeppelin/contracts/token/ERC20/ERC20Detailed.sol": {
       "lastModificationDate": 1753108355404,
       "contentHash": "a1a39233394f3c0a00ce348c61433faa",
@@ -2401,6 +2366,41 @@
       ],
       "artifacts": [
         "BitMath"
+      ]
+    },
+    "/Users/novem/Documents/FlutterProjects/uniswap-contracts-cypherium-main/contracts/WSOMI.sol": {
+      "lastModificationDate": 1753982633335,
+      "contentHash": "2a58f0b56a5ee084f09d0ba0dc67852a",
+      "sourceName": "contracts/WSOMI.sol",
+      "solcConfig": {
+        "version": "0.6.6",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "=0.6.6"
+      ],
+      "artifacts": [
+        "WSOMI"
       ]
     }
   }

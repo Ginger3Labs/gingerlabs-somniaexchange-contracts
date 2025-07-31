@@ -19,9 +19,9 @@
 
 pragma solidity =0.6.6;
 
-contract WSTT {
-    string public name = "Wrapped STT";
-    string public symbol = "WSTT";
+contract WSOMI {
+    string public name = "Wrapped SOMI";
+    string public symbol = "WSOMI";
     uint8 public decimals = 18;
 
     event Approval(address indexed src, address indexed guy, uint wad);
