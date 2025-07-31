@@ -15,12 +15,10 @@ Token2 contract deployed to: 0x493f980848a2ccdB4425757619e7CA1335dc6933
 */
 async function main() {
     const contractAddresses = {
-        wstt: "0x5Bf3883758890eff0F86B14eCdf658485A9E9101",
-        factory: "0x2713FED1D9175C052857F6D0cBC2489A610124b7",
-        router: "0xE9ebBD400aA2872d9013de40396C6486B561E992",
-        multicall: "0xf213dad4ba6D6bf7A7aa1D8ad86a12481C212999",
-        token1: "0x388fD89190b7D1193890954CE0c0604648Ec4261",
-        token2: "0x493f980848a2ccdB4425757619e7CA1335dc6933"
+        wstt: "0x72D4fb496bAB1536ed4F1A47d8C647BBD3e3705c",
+        factory: "0x6C4853C97b981Aa848C2b56F160a73a46b5DCCD4",
+        router: "0xA63D63A489CB3C98057EC527DC702eA7F5C04E82",
+        multicall: "0x040377003D848f34874564B354bCA97Da4231Ff7",
     };
 
     // Get deployer address from private key to avoid ethers.getSigners()
@@ -50,10 +48,10 @@ async function main() {
     // Verify Token1
     // NOTE: Constructor arguments for generic tokens might need to be adjusted
     // Assuming they were deployed with standard names/symbols for now.
-    await verifyContract("Token", contractAddresses.token1, ["Token1", "TKN1"]);
+/*     await verifyContract("Token", contractAddresses.token1, ["Token1", "TKN1"]);
 
     // Verify Token2
-    await verifyContract("Token", contractAddresses.token2, ["Token2", "TKN2"]);
+    await verifyContract("Token", contractAddresses.token2, ["Token2", "TKN2"]); */
 
     console.log("Verification process finished.");
 }
