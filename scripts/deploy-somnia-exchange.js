@@ -24,7 +24,7 @@ async function deploy() {
    const router = await ethers.getContractFactory('SomniaExchangeRouter02');
    const routerInstance = await router.deploy(
       '0x6C4853C97b981Aa848C2b56F160a73a46b5DCCD4',
-      '0x72D4fb496bAB1536ed4F1A47d8C647BBD3e3705c'
+      '0x046EDe9564A72571df6F5e44d0405360c0f4dCab'
    );
    await routerInstance.waitForDeployment();
    console.log("Router contract deployed to:", routerInstance.target);
