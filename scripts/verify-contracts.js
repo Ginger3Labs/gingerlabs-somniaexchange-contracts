@@ -17,7 +17,7 @@ async function main() {
     const contractAddresses = {
         wstt: "0x72D4fb496bAB1536ed4F1A47d8C647BBD3e3705c",
         factory: "0x6C4853C97b981Aa848C2b56F160a73a46b5DCCD4",
-        router: "0xA63D63A489CB3C98057EC527DC702eA7F5C04E82",
+        router: "0x255aF24a5Dc56f524d95D25F2BFb1Be77AE3FEf7",
         multicall: "0x040377003D848f34874564B354bCA97Da4231Ff7",
     };
 

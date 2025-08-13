@@ -1,11 +1,11 @@
 const { ethers } = require('hardhat');
 
 // New configuration for Token-to-Token liquidity
-const ROUTER_ADDRESS = "0xE9ebBD400aA2872d9013de40396C6486B561E992";
-const TOKEN1_ADDRESS = "0x388fD89190b7D1193890954CE0c0604648Ec4261";
-const TOKEN2_ADDRESS = "0x493f980848a2ccdB4425757619e7CA1335dc6933";
-const LIQUIDITY_TOKEN1_AMOUNT = "10"; // Amount of TOKEN1 to add
-const LIQUIDITY_TOKEN2_AMOUNT = "10"; // Amount of TOKEN2 to add
+const ROUTER_ADDRESS = "0x255aF24a5Dc56f524d95D25F2BFb1Be77AE3FEf7";
+const TOKEN1_ADDRESS = "0xC063B29CD6B30885783B505aE180B3079e0A2154";
+const TOKEN2_ADDRESS = "0x046EDe9564A72571df6F5e44d0405360c0f4dCab";
+const LIQUIDITY_TOKEN1_AMOUNT = "2"; // Amount of TOKEN1 to add
+const LIQUIDITY_TOKEN2_AMOUNT = "1"; // Amount of TOKEN2 to add
 
 async function main() {
     const [deployer] = await ethers.getSigners();

@@ -7,33 +7,33 @@ async function deploy() {
    console.log(`Deploying contracts using ${deployerAddress}`);
 
    //Deploy WETH
-   const wstt = await ethers.getContractFactory('WSOMI');
+/*    const wstt = await ethers.getContractFactory('WSOMI');
    const wsttInstance = await wstt.deploy();
    await wsttInstance.waitForDeployment();
    console.log(`WSOMI deployed to : ${wsttInstance.target}`);
-   await new Promise(resolve => setTimeout(resolve, 5000)); // 5 saniye bekle
+   await new Promise(resolve => setTimeout(resolve, 5000)); // 5 saniye bekle */
 
    //Deploy Factory
-   const factory = await ethers.getContractFactory('SomniaExchangeFactory');
+/*    const factory = await ethers.getContractFactory('SomniaExchangeFactory');
    const factoryInstance = await factory.deploy(deployerAddress);
    await factoryInstance.waitForDeployment();
    console.log("Factory contract deployed to:", factoryInstance.target);
-   await new Promise(resolve => setTimeout(resolve, 10000)); // 5 saniye bekle
+   await new Promise(resolve => setTimeout(resolve, 10000)); // 5 saniye bekle */
 
    //Deploy Router passing Factory Address and WETH Address
    const router = await ethers.getContractFactory('SomniaExchangeRouter02');
    const routerInstance = await router.deploy(
-      factoryInstance.target,
-      wsttInstance.target
+      '0x6C4853C97b981Aa848C2b56F160a73a46b5DCCD4',
+      '0x72D4fb496bAB1536ed4F1A47d8C647BBD3e3705c'
    );
    await routerInstance.waitForDeployment();
    console.log("Router contract deployed to:", routerInstance.target);
 
    //Deploy Multicall (needed for Interface)
-   const multicall = await ethers.getContractFactory('Multicall');
+/*    const multicall = await ethers.getContractFactory('Multicall');
    const multicallInstance = await multicall.deploy();
    await multicallInstance.waitForDeployment();
-   console.log(`Multicall deployed to : ${multicallInstance.target}`);
+   console.log(`Multicall deployed to : ${multicallInstance.target}`); */
 
    //Deploy Tokens
 /*    const tok1 = await ethers.getContractFactory('Token');
@@ -108,10 +108,7 @@ async function deploy() {
 
    // Save deployed addresses
    const deployedAddresses = {
-      WETH: wsttInstance.target,
-      Factory: factoryInstance.target,
       Router: routerInstance.target,
-      Multicall: multicallInstance.target,
    };
 
    console.log('\nDeployed Addresses:', deployedAddresses);
