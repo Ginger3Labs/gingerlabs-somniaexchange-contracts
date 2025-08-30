@@ -25,7 +25,6 @@ interface CacheData {
 }
 
 const CACHE_KEY_PREFIX = 'lpPositionsCache_';
-const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 saat
 
 export default function Home() {
   const [positions, setPositions] = useState<LpPosition[]>([]);
@@ -91,9 +90,9 @@ export default function Home() {
       const provider = new ethers.JsonRpcProvider(RPC_URL);
       const factory = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
 
-      // --- Fiyat Hesaplama Mantığı ---
-      const priceMap = new Map<string, number>();
-      priceMap.set(USDC_ADDRESS.toLowerCase(), 1.0);
+      // --- Fiyat Hesaplama Mantığı (v2 - Yönlendirme ile) ---
+      const PRICE_PRECISION = 30; // BigInt hesaplamaları için yüksek hassasiyet
+      const router = new ethers.Contract(ROUTER_ADDRESS, RouterABI.abi, provider);
 
       const decimalsCache = new Map<string, number>();
       const getDecimals = async (tokenAddress: string): Promise<number> => {
@@ -102,153 +101,199 @@ export default function Home() {
         try {
           const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, provider);
           const decimals = await tokenContract.decimals();
-          const numDecimals = Number(decimals);
-          decimalsCache.set(address, numDecimals);
-          return numDecimals;
+          const decimalsNum = Number(decimals);
+          decimalsCache.set(address, decimalsNum);
+          return decimalsNum;
         } catch (e) {
+          console.warn(`Could not fetch decimals for ${tokenAddress}, defaulting to 18.`);
           decimalsCache.set(address, 18); // Varsayılan
           return 18;
         }
       };
 
-      const getTokenPrice = async (tokenAddress: string): Promise<number> => {
-        const address = tokenAddress.toLowerCase();
-        if (priceMap.has(address)) return priceMap.get(address)!;
+      const getBestAmountOut = async (tokenInAddress: string, tokenOutAddress: string, amountIn: bigint): Promise<bigint> => {
+        const routes: string[][] = [
+          [tokenInAddress, tokenOutAddress], // Direct route
+          [tokenInAddress, WSTT_ADDRESS, tokenOutAddress] // Route via WSTT
+        ];
 
-        // USDC'ye karşı fiyat bul
-        try {
-          const pairVsUSDC = await factory.getPair(tokenAddress, USDC_ADDRESS);
-          if (pairVsUSDC !== ethers.ZeroAddress) {
-            const pairContract = new ethers.Contract(pairVsUSDC, PairABI.abi, provider);
-            const [reserves, token0] = await Promise.all([pairContract.getReserves(), pairContract.token0()]);
-            const [dec0, dec1] = await Promise.all([getDecimals(token0), getDecimals(USDC_ADDRESS)]);
-            if (Number(ethers.formatUnits(reserves[0], dec0)) === 0) return 0; // Bölme hatasını önle
-            const price = token0.toLowerCase() === address
-              ? Number(ethers.formatUnits(reserves[1], dec1)) / Number(ethers.formatUnits(reserves[0], dec0))
-              : Number(ethers.formatUnits(reserves[0], dec0)) / Number(ethers.formatUnits(reserves[1], dec1));
-            priceMap.set(address, price);
-            return price;
-          }
-        } catch (e) { console.warn(`USDC pair price check failed for ${tokenAddress}`) }
+        let bestAmountOut = 0n;
 
-
-        // WSTT'ye karşı fiyat bul
-        try {
-          const wsttPrice = await getTokenPrice(WSTT_ADDRESS);
-          if (wsttPrice > 0) {
-            const pairVsWSTT = await factory.getPair(tokenAddress, WSTT_ADDRESS);
-            if (pairVsWSTT !== ethers.ZeroAddress) {
-              const pairContract = new ethers.Contract(pairVsWSTT, PairABI.abi, provider);
-              const [reserves, token0] = await Promise.all([pairContract.getReserves(), pairContract.token0()]);
-              const [dec0, dec1] = await Promise.all([getDecimals(token0), getDecimals(WSTT_ADDRESS)]);
-              if (Number(ethers.formatUnits(reserves[0], dec0)) === 0) return 0; // Bölme hatasını önle
-              const priceInWSTT = token0.toLowerCase() === address
-                ? Number(ethers.formatUnits(reserves[1], dec1)) / Number(ethers.formatUnits(reserves[0], dec0))
-                : Number(ethers.formatUnits(reserves[0], dec0)) / Number(ethers.formatUnits(reserves[1], dec1));
-              const price = priceInWSTT * wsttPrice;
-              priceMap.set(address, price);
-              return price;
+        for (const route of routes) {
+          try {
+            // Check if the pair exists for direct routes to avoid unnecessary RPC calls
+            if (route.length === 2) {
+              const pairAddress = await factory.getPair(route[0], route[1]);
+              if (pairAddress === ethers.ZeroAddress) {
+                continue; // Skip if pair doesn't exist
+              }
             }
+            const amountsOut = await router.getAmountsOut(amountIn, route);
+            const currentAmountOut = amountsOut[amountsOut.length - 1];
+            if (currentAmountOut > bestAmountOut) {
+              bestAmountOut = currentAmountOut;
+            }
+          } catch (error) {
+            // Silently ignore errors for routes that don't exist or have low liquidity
           }
-        } catch (e) { console.warn(`WSTT pair price check failed for ${tokenAddress}`) }
-
-
-        priceMap.set(address, 0);
-        return 0;
+        }
+        return bestAmountOut;
       };
 
-      // Referans token fiyatını önceden yükle
-      await getTokenPrice(WSTT_ADDRESS);
+      const priceCache = new Map<string, string>();
+      const getTokenPriceInUSDC = async (tokenAddress: string): Promise<string> => {
+        const address = tokenAddress.toLowerCase();
+        if (address === USDC_ADDRESS.toLowerCase()) return '1.0';
+        if (priceCache.has(address)) return priceCache.get(address)!;
+
+        try {
+          const tokenInDecimals = await getDecimals(tokenAddress);
+          const usdcDecimals = await getDecimals(USDC_ADDRESS);
+
+          // 1 tam token birimi için hesapla
+          const amountIn = ethers.parseUnits('1', tokenInDecimals);
+
+          const bestAmountOut = await getBestAmountOut(tokenAddress, USDC_ADDRESS, amountIn);
+
+          if (bestAmountOut === 0n) {
+            priceCache.set(address, '0');
+            return '0';
+          }
+
+          const priceString = ethers.formatUnits(bestAmountOut, usdcDecimals);
+          priceCache.set(address, priceString);
+          return priceString;
+
+        } catch (error) {
+          console.error(`[priceService] Failed to get price for ${tokenAddress}:`, error);
+          priceCache.set(address, '0');
+          return '0';
+        }
+      };
       // --- Fiyat Hesaplama Bitiş ---
 
       const pairCount = await factory.allPairsLength();
       const pairsToScan = Number(pairCount);
+      const BATCH_SIZE = 25; // RPC limitlerini aşmamak için düşürüldü
 
       setInfoMessage(`Toplam ${pairsToScan} çift var, taramaya ${startFrom + 1}. çiftten devam ediliyor...`);
 
-      for (let i = startFrom; i < pairsToScan; i++) {
-        try {
-          const pairAddress = await factory.allPairs(i);
-          setInfoMessage(`Çift ${i + 1}/${pairsToScan} taranıyor...`);
+      for (let i = startFrom; i < pairsToScan; i += BATCH_SIZE) {
+        const batchEnd = Math.min(i + BATCH_SIZE, pairsToScan);
+        setInfoMessage(`Çiftler ${i + 1}-${batchEnd}/${pairsToScan} taranıyor...`);
 
+        // 1. Adım: Gruptaki tüm çift adreslerini paralel olarak al
+        const pairIndexPromises = [];
+        for (let j = i; j < batchEnd; j++) {
+          pairIndexPromises.push(factory.allPairs(j));
+        }
+        const pairAddresses = await Promise.all(pairIndexPromises);
+
+        // 2. Adım: Gruptaki tüm çiftlerin LP bakiyelerini paralel olarak kontrol et
+        const balancePromises = pairAddresses.map(pairAddress => {
           const pairContract = new ethers.Contract(pairAddress, PairABI.abi, provider);
-          const lpBalance = await pairContract.balanceOf(walletAddress);
+          return pairContract.balanceOf(walletAddress).then(balance => ({ pairAddress, balance }));
+        });
 
-          if (lpBalance > 0) {
-            const token0Address = await pairContract.token0();
-            const token1Address = await pairContract.token1();
-            const reserves = await pairContract.getReserves();
-            const totalSupply = await pairContract.totalSupply();
-            const token0Contract = new ethers.Contract(token0Address, ERC20ABI.abi, provider);
-            const token1Contract = new ethers.Contract(token1Address, ERC20ABI.abi, provider);
-            const [token0Symbol, token1Symbol] = await Promise.all([
-              token0Contract.symbol().catch(() => '???'),
-              token1Contract.symbol().catch(() => '???')
-            ]);
-            const token0Value = (reserves[0] * lpBalance) / totalSupply;
-            const token1Value = (reserves[1] * lpBalance) / totalSupply;
-            const poolShare = (lpBalance * 10000n) / totalSupply;
+        const balances = await Promise.all(balancePromises);
 
-            const [token0Decimals, token1Decimals] = await Promise.all([
-              getDecimals(token0Address),
-              getDecimals(token1Address)
-            ]);
+        // 3. Adım: Sadece bakiyesi olan çiftleri filtrele
+        const pairsWithBalance = balances.filter(({ balance }) => balance > 0);
 
-            const token0Amount = ethers.formatUnits(token0Value, token0Decimals);
-            const token1Amount = ethers.formatUnits(token1Value, token1Decimals);
+        if (pairsWithBalance.length > 0) {
+          // 4. Adım: Bakiyesi olan çiftlerin detaylarını paralel olarak al
+          const positionPromises = pairsWithBalance.map(async ({ pairAddress, balance }) => {
+            try {
+              console.log(`İşleniyor: ${pairAddress}`); // Hata ayıklama için log eklendi
+              const pairContract = new ethers.Contract(pairAddress, PairABI.abi, provider);
+              const [token0Address, token1Address, reserves, totalSupply] = await Promise.all([
+                pairContract.token0(),
+                pairContract.token1(),
+                pairContract.getReserves(),
+                pairContract.totalSupply()
+              ]);
 
-            const [token0Price, token1Price] = await Promise.all([
-              getTokenPrice(token0Address),
-              getTokenPrice(token1Address)
-            ]);
+              const token0Contract = new ethers.Contract(token0Address, ERC20ABI.abi, provider);
+              const token1Contract = new ethers.Contract(token1Address, ERC20ABI.abi, provider);
+              const [token0Symbol, token1Symbol] = await Promise.all([
+                token0Contract.symbol().catch(() => '???'),
+                token1Contract.symbol().catch(() => '???')
+              ]);
 
-            const positionValueUSD = (parseFloat(token0Amount) * token0Price) + (parseFloat(token1Amount) * token1Price);
+              if (totalSupply === 0n) return null; // Prevent division by zero
 
-            const position: LpPosition = {
-              pairAddress,
-              token0: { address: token0Address, symbol: token0Symbol, value: token0Amount },
-              token1: { address: token1Address, symbol: token1Symbol, value: token1Amount },
-              lpBalance: ethers.formatEther(lpBalance),
-              poolShare: (Number(poolShare) / 100).toFixed(2),
-              totalValueUSD: positionValueUSD.toFixed(2),
-            };
+              // Kullanıcının havuzdaki payını temsil eden token miktarları
+              const token0Value = (BigInt(reserves[0]) * BigInt(balance)) / BigInt(totalSupply);
+              const token1Value = (BigInt(reserves[1]) * BigInt(balance)) / BigInt(totalSupply);
+              const poolShare = (balance * 10000n) / totalSupply;
 
+              // Token ondalık basamaklarını al
+              const [token0Decimals, token1Decimals] = await Promise.all([
+                getDecimals(token0Address),
+                getDecimals(token1Address)
+              ]);
+
+              // Token fiyatlarını USDC cinsinden al (string olarak)
+              const [price0Str, price1Str] = await Promise.all([
+                getTokenPriceInUSDC(token0Address),
+                getTokenPriceInUSDC(token1Address)
+              ]);
+
+              // Fiyatları BigInt'e çevir
+              const token0Price = ethers.parseUnits(price0Str, PRICE_PRECISION);
+              const token1Price = ethers.parseUnits(price1Str, PRICE_PRECISION);
+
+              // Pozisyonun her bir parçasının USD değerini hesapla
+              // Değer = (token_miktarı * token_fiyatı_hassas) / (10 ** token_ondalık)
+              const token0ValueUSD = (token0Value * token0Price) / (10n ** BigInt(token0Decimals));
+              const token1ValueUSD = (token1Value * token1Price) / (10n ** BigInt(token1Decimals));
+              const positionValueUSD = token0ValueUSD + token1ValueUSD;
+
+              return {
+                pairAddress,
+                token0: { address: token0Address, symbol: token0Symbol, value: ethers.formatUnits(token0Value, token0Decimals) },
+                token1: { address: token1Address, symbol: token1Symbol, value: ethers.formatUnits(token1Value, token1Decimals) },
+                lpBalance: ethers.formatEther(balance),
+                poolShare: (Number(poolShare) / 100).toFixed(2),
+                totalValueUSD: ethers.formatUnits(positionValueUSD, PRICE_PRECISION),
+              };
+            } catch (e) {
+              console.warn(`Pozisyon detayı alınırken hata oluştu (${pairAddress}):`, e);
+              return null; // Hata durumunda null döndür
+            }
+          });
+
+          const newPositionsData = (await Promise.all(positionPromises)).filter((p): p is LpPosition => p !== null);
+
+          if (newPositionsData.length > 0) {
             setPositions(prevPositions => {
-              // Pozisyonun zaten listede olup olmadığını kontrol et (çift adresine göre)
-              if (prevPositions.some(p => p.pairAddress === position.pairAddress)) {
-                // Tarama devam ederken önbellekten gelen veri tekrar bulunursa state'i güncelleme.
-                // Sadece önbelleği güncelle, çünkü index ilerledi.
-                const cacheData: CacheData = {
-                  timestamp: Date.now(),
-                  lastScannedIndex: i,
-                  totalPairCount: pairsToScan,
-                  data: prevPositions
-                };
-                localStorage.setItem(currentCacheKey, JSON.stringify(cacheData));
+              const existingPairAddresses = new Set(prevPositions.map(p => p.pairAddress));
+              const uniqueNewPositions = newPositionsData.filter(p => !existingPairAddresses.has(p.pairAddress));
+
+              if (uniqueNewPositions.length === 0) {
                 return prevPositions;
               }
 
-              const newPositions = [...prevPositions, position].sort((a, b) => parseFloat(b.totalValueUSD) - parseFloat(a.totalValueUSD));
-
-              const newTotalValue = newPositions.reduce((sum, pos) => sum + parseFloat(pos.totalValueUSD), 0);
+              const allPositions = [...prevPositions, ...uniqueNewPositions].sort((a, b) => parseFloat(b.totalValueUSD) - parseFloat(a.totalValueUSD));
+              const newTotalValue = allPositions.reduce((sum, pos) => sum + parseFloat(pos.totalValueUSD), 0);
               setTotalPortfolioValue(newTotalValue);
-
-              // Her adımda önbelleği güncelle
-              const cacheData: CacheData = {
-                timestamp: Date.now(),
-                lastScannedIndex: i,
-                totalPairCount: pairsToScan,
-                data: newPositions
-              };
-              localStorage.setItem(currentCacheKey, JSON.stringify(cacheData));
-              setCacheTimestamp(cacheData.timestamp);
-
-              return newPositions;
+              return allPositions;
             });
           }
-        } catch (pairError) {
-          console.warn(`Bir çift işlenirken hata oluştu (index: ${i}), atlanıyor: ${pairError}`);
         }
+
+        // 5. Adım: Her grubun sonunda önbelleği güncelle
+        setPositions(currentPositions => {
+          const cacheData: CacheData = {
+            timestamp: Date.now(),
+            lastScannedIndex: batchEnd - 1,
+            totalPairCount: pairsToScan,
+            data: currentPositions
+          };
+          localStorage.setItem(currentCacheKey, JSON.stringify(cacheData));
+          setCacheTimestamp(cacheData.timestamp);
+          return currentPositions;
+        });
       }
 
       setInfoMessage('Tarama tamamlandı.');
@@ -361,7 +406,7 @@ export default function Home() {
             <div key={pos.pairAddress} className="bg-gray-800 p-4 rounded-lg shadow-md animate-fade-in">
               <div className="flex justify-between items-start">
                 <h3 className="text-lg font-semibold break-all w-3/4">{pos.token0.symbol}/{pos.token1.symbol}</h3>
-                <span className="text-xl font-bold text-green-500">${pos.totalValueUSD}</span>
+                <span className="text-xl font-bold text-green-500">${parseFloat(pos.totalValueUSD).toFixed(2)}</span>
               </div>
               <p className="text-xs text-gray-400 break-all mb-2">{pos.pairAddress}</p>
               <div className="mt-2 space-y-1 text-sm">
