@@ -112,21 +112,19 @@ export default function Home() {
       };
 
       const getBestAmountOut = async (tokenInAddress: string, tokenOutAddress: string, amountIn: bigint): Promise<bigint> => {
+        // Rotaları, hedef token'a (WSTT) göre yeniden düzenle
         const routes: string[][] = [
-          [tokenInAddress, tokenOutAddress], // Direct route
-          [tokenInAddress, WSTT_ADDRESS, tokenOutAddress] // Route via WSTT
+          [tokenInAddress, tokenOutAddress], // Direkt Rota: TOKEN -> WSTT
+          [tokenInAddress, USDC_ADDRESS, tokenOutAddress] // USDC Üzerinden Rota: TOKEN -> USDC -> WSTT
         ];
 
         let bestAmountOut = 0n;
 
         for (const route of routes) {
           try {
-            // Check if the pair exists for direct routes to avoid unnecessary RPC calls
             if (route.length === 2) {
               const pairAddress = await factory.getPair(route[0], route[1]);
-              if (pairAddress === ethers.ZeroAddress) {
-                continue; // Skip if pair doesn't exist
-              }
+              if (pairAddress === ethers.ZeroAddress) continue;
             }
             const amountsOut = await router.getAmountsOut(amountIn, route);
             const currentAmountOut = amountsOut[amountsOut.length - 1];
@@ -134,38 +132,48 @@ export default function Home() {
               bestAmountOut = currentAmountOut;
             }
           } catch (error) {
-            // Silently ignore errors for routes that don't exist or have low liquidity
+            // Hatalı veya likiditesiz rotaları sessizce atla
           }
         }
         return bestAmountOut;
       };
 
       const priceCache = new Map<string, string>();
-      const getTokenPriceInUSDC = async (tokenAddress: string): Promise<string> => {
+      // Fonksiyonu, WSTT'yi referans alacak şekilde yeniden adlandır ve düzenle
+      const getTokenPriceInWSTT = async (tokenAddress: string): Promise<string> => {
         const address = tokenAddress.toLowerCase();
-        if (address === USDC_ADDRESS.toLowerCase()) return '1.0';
+        // Referans token WSTT olduğu için, kendi fiyatı her zaman 1.0'dır.
+        if (address === WSTT_ADDRESS.toLowerCase()) return '1.0';
         if (priceCache.has(address)) return priceCache.get(address)!;
 
         try {
           const tokenInDecimals = await getDecimals(tokenAddress);
-          const usdcDecimals = await getDecimals(USDC_ADDRESS);
+          const wsttDecimals = await getDecimals(WSTT_ADDRESS);
 
-          // 1 tam token birimi için hesapla
           const amountIn = ethers.parseUnits('1', tokenInDecimals);
 
-          const bestAmountOut = await getBestAmountOut(tokenAddress, USDC_ADDRESS, amountIn);
+          // Hedef token olarak WSTT_ADDRESS'i kullan
+          const bestAmountOut = await getBestAmountOut(tokenAddress, WSTT_ADDRESS, amountIn);
 
           if (bestAmountOut === 0n) {
             priceCache.set(address, '0');
             return '0';
           }
 
-          const priceString = ethers.formatUnits(bestAmountOut, usdcDecimals);
+          const priceString = ethers.formatUnits(bestAmountOut, wsttDecimals);
+
+          const MAX_REASONABLE_PRICE = 1_000_000_000; // 1 Milyar WSTT
+          if (Number(priceString) > MAX_REASONABLE_PRICE) {
+            console.warn(`Fahiş fiyat tespit edildi (${tokenAddress}): ${priceString} WSTT. Fiyat 0 olarak kabul ediliyor.`);
+            priceCache.set(address, '0');
+            return '0';
+          }
+
           priceCache.set(address, priceString);
           return priceString;
 
         } catch (error) {
-          console.error(`[priceService] Failed to get price for ${tokenAddress}:`, error);
+          console.error(`[priceService] Failed to get price for ${tokenAddress} in WSTT:`, error);
           priceCache.set(address, '0');
           return '0';
         }
@@ -182,12 +190,18 @@ export default function Home() {
         const batchEnd = Math.min(i + BATCH_SIZE, pairsToScan);
         setInfoMessage(`Çiftler ${i + 1}-${batchEnd}/${pairsToScan} taranıyor...`);
 
-        // 1. Adım: Gruptaki tüm çift adreslerini paralel olarak al
-        const pairIndexPromises = [];
+        // 1. Adım: Gruptaki tüm çift adreslerini paralel olarak al (Hata toleranslı)
+        const pairAddressPromises = [];
         for (let j = i; j < batchEnd; j++) {
-          pairIndexPromises.push(factory.allPairs(j));
+          pairAddressPromises.push(
+            factory.allPairs(j).catch(err => {
+              console.warn(`Dizin ${j} için çift adresi alınamadı, atlanıyor. Hata:`, err.code);
+              return null; // Hata durumunda null döndürerek Promise.all'un devam etmesini sağla
+            })
+          );
         }
-        const pairAddresses = await Promise.all(pairIndexPromises);
+        // Hatalı (null) veya boş adresleri filtreleyerek devam et
+        const pairAddresses = (await Promise.all(pairAddressPromises)).filter((addr): addr is string => addr !== null && addr !== ethers.ZeroAddress);
 
         // 2. Adım: Gruptaki tüm çiftlerin LP bakiyelerini paralel olarak kontrol et
         const balancePromises = pairAddresses.map(pairAddress => {
@@ -220,41 +234,72 @@ export default function Home() {
                 token1Contract.symbol().catch(() => '???')
               ]);
 
-              if (totalSupply === 0n) return null; // Prevent division by zero
+              if (BigInt(totalSupply) === 0n) return null; // Sıfıra bölmeyi engelle
 
-              // Kullanıcının havuzdaki payını temsil eden token miktarları
-              const token0Value = (BigInt(reserves[0]) * BigInt(balance)) / BigInt(totalSupply);
-              const token1Value = (BigInt(reserves[1]) * BigInt(balance)) / BigInt(totalSupply);
-              const poolShare = (balance * 10000n) / totalSupply;
+              // Tüm ham değerleri BigInt'e çevir
+              const bn_balance = BigInt(balance);
+              const bn_totalSupply = BigInt(totalSupply);
+              const bn_reserves0 = BigInt(reserves[0]);
+              const bn_reserves1 = BigInt(reserves[1]);
 
-              // Token ondalık basamaklarını al
+              // Token ondalık basamaklarını ve GÜVENLİ fiyatlarını al
               const [token0Decimals, token1Decimals] = await Promise.all([
                 getDecimals(token0Address),
                 getDecimals(token1Address)
               ]);
-
-              // Token fiyatlarını USDC cinsinden al (string olarak)
               const [price0Str, price1Str] = await Promise.all([
-                getTokenPriceInUSDC(token0Address),
-                getTokenPriceInUSDC(token1Address)
+                getTokenPriceInWSTT(token0Address), // USDC yerine WSTT bazlı fiyat fonksiyonunu çağır
+                getTokenPriceInWSTT(token1Address)
               ]);
 
-              // Fiyatları BigInt'e çevir
+              // Fiyat string'lerini BigInt'e çevir
               const token0Price = ethers.parseUnits(price0Str, PRICE_PRECISION);
               const token1Price = ethers.parseUnits(price1Str, PRICE_PRECISION);
 
-              // Pozisyonun her bir parçasının USD değerini hesapla
-              // Değer = (token_miktarı * token_fiyatı_hassas) / (10 ** token_ondalık)
-              const token0ValueUSD = (token0Value * token0Price) / (10n ** BigInt(token0Decimals));
-              const token1ValueUSD = (token1Value * token1Price) / (10n ** BigInt(token1Decimals));
-              const positionValueUSD = token0ValueUSD + token1ValueUSD;
+              // Havuz payını hesapla
+              const poolShare = (bn_balance * 10000n) / bn_totalSupply;
+              const bn_ten = 10n;
+
+              // --- HATA AYIKLAMA LOGLARI ---
+              console.log(` çifti için HESAPLAMA DETAYLARI`);
+              console.log(`-----------------------------------`);
+              console.log(`${token0Symbol} Fiyat (String):`, price0Str);
+              console.log(`${token1Symbol} Fiyat (String):`, price1Str);
+              console.log(`${token0Symbol} Fiyat (BigInt):`, token0Price.toString());
+              console.log(`${token1Symbol} Fiyat (BigInt):`, token1Price.toString());
+              console.log(`${token0Symbol} Ondalık:`, token0Decimals);
+              console.log(`${token1Symbol} Ondalık:`, token1Decimals);
+              console.log(`${token0Symbol} Rezerv:`, bn_reserves0.toString());
+              console.log(`${token1Symbol} Rezerv:`, bn_reserves1.toString());
+              // --- HATA AYIKLAMA LOGLARI BİTİŞ ---
+
+              // Adım 1: Havuzun her iki tarafının da toplam USD değerini (TVL) hesapla
+              const poolTvl0 = (bn_reserves0 * token0Price) / (bn_ten ** BigInt(token0Decimals));
+              const poolTvl1 = (bn_reserves1 * token1Price) / (bn_ten ** BigInt(token1Decimals));
+
+              // Adım 2: Havuzun GÜVENİLİR toplam değerini, düşük değerli tarafı baz alarak hesapla
+              const reliableTotalPoolTvl = poolTvl0 < poolTvl1 ? poolTvl0 * 2n : poolTvl1 * 2n;
+
+              // Adım 3: Kullanıcının pozisyonunun nihai USD değerini bu güvenilir değere göre hesapla
+              const positionValueUSD = (reliableTotalPoolTvl * bn_balance) / bn_totalSupply;
+
+              // Adım 4: Arayüzde göstermek için, bu nihai değerden token miktarlarını türet
+              const valueOfEachTokenInUSD = positionValueUSD / 2n;
+              let token0DerivedAmount = 0n;
+              if (token0Price > 0n) {
+                token0DerivedAmount = (valueOfEachTokenInUSD * (bn_ten ** BigInt(token0Decimals))) / token0Price;
+              }
+              let token1DerivedAmount = 0n;
+              if (token1Price > 0n) {
+                token1DerivedAmount = (valueOfEachTokenInUSD * (bn_ten ** BigInt(token1Decimals))) / token1Price;
+              }
 
               return {
                 pairAddress,
-                token0: { address: token0Address, symbol: token0Symbol, value: ethers.formatUnits(token0Value, token0Decimals) },
-                token1: { address: token1Address, symbol: token1Symbol, value: ethers.formatUnits(token1Value, token1Decimals) },
+                token0: { address: token0Address, symbol: token0Symbol, value: ethers.formatUnits(token0DerivedAmount, token0Decimals) },
+                token1: { address: token1Address, symbol: token1Symbol, value: ethers.formatUnits(token1DerivedAmount, token1Decimals) },
                 lpBalance: ethers.formatEther(balance),
-                poolShare: (Number(poolShare) / 100).toFixed(2),
+                poolShare: (Number(poolShare) / 100).toFixed(4),
                 totalValueUSD: ethers.formatUnits(positionValueUSD, PRICE_PRECISION),
               };
             } catch (e) {
@@ -406,7 +451,7 @@ export default function Home() {
             <div key={pos.pairAddress} className="bg-gray-800 p-4 rounded-lg shadow-md animate-fade-in">
               <div className="flex justify-between items-start">
                 <h3 className="text-lg font-semibold break-all w-3/4">{pos.token0.symbol}/{pos.token1.symbol}</h3>
-                <span className="text-xl font-bold text-green-500">${parseFloat(pos.totalValueUSD).toFixed(2)}</span>
+                <span className="text-xl font-bold text-green-500">${Number(pos.totalValueUSD).toFixed(2)}</span>
               </div>
               <p className="text-xs text-gray-400 break-all mb-2">{pos.pairAddress}</p>
               <div className="mt-2 space-y-1 text-sm">
