@@ -8,10 +8,6 @@ async function checkLPBalance() {
         const FACTORY_ADDRESS = "0x31015A978c5815EdE29D0F969a17e116BC1866B1".toLowerCase();
         const YOUR_WALLET = "0xD8976d7D8F18e536827113dc3707c55f15FC8915";
 
-        // Pair adresleri (deploy scriptinizden alın)
-        const TOKEN1_ADDRESS = "YOUR_TOKEN1_ADDRESS"; // Token1 adresi
-        const TOKEN2_ADDRESS = "YOUR_TOKEN2_ADDRESS"; // Token2 adresi
-
         // Factory kontratına bağlan
         const factory = await ethers.getContractAt("SomniaExchangeFactory", FACTORY_ADDRESS);
 
@@ -40,21 +36,22 @@ async function checkLPBalance() {
 
                 console.log(`Token0: ${token0}`);
                 console.log(`Token1: ${token1}`);
-                console.log(`Reserve0: ${ethers.utils.formatEther(reserves[0])}`);
-                console.log(`Reserve1: ${ethers.utils.formatEther(reserves[1])}`);
-                console.log(`Sizin LP Token: ${ethers.utils.formatEther(lpBalance)}`);
-                console.log(`Toplam LP Supply: ${ethers.utils.formatEther(totalSupply)}`);
+                console.log(`Reserve0: ${ethers.formatEther(reserves[0])}`);
+                console.log(`Reserve1: ${ethers.formatEther(reserves[1])}`);
+                const lpBalanceFormatted = ethers.formatEther(lpBalance);
+                console.log(`Sizin LP Token: ${lpBalanceFormatted}`);
+                console.log(`Toplam LP Supply: ${ethers.formatEther(totalSupply)}`);
 
-                if (lpBalance.gt(0)) {
-                    const percentage = lpBalance.mul(10000).div(totalSupply);
-                    console.log(`🟢 Pool Payınız: %${percentage.toNumber() / 100}`);
+                if (lpBalance > 0) {
+                    const percentage = (lpBalance * 10000n) / totalSupply;
+                    console.log(`🟢 Pool Payınız: %${Number(percentage) / 100}`);
 
                     // Underlying token değerlerini hesapla
-                    const token0Amount = reserves[0].mul(lpBalance).div(totalSupply);
-                    const token1Amount = reserves[1].mul(lpBalance).div(totalSupply);
+                    const token0Amount = (reserves[0] * lpBalance) / totalSupply;
+                    const token1Amount = (reserves[1] * lpBalance) / totalSupply;
 
-                    console.log(`💰 Token0 değeri: ${ethers.utils.formatEther(token0Amount)}`);
-                    console.log(`💰 Token1 değeri: ${ethers.utils.formatEther(token1Amount)}`);
+                    console.log(`💰 Token0 değeri: ${ethers.formatEther(token0Amount)}`);
+                    console.log(`💰 Token1 değeri: ${ethers.formatEther(token1Amount)}`);
                 } else {
                     console.log(`🔴 Bu pair'da LP token yok`);
                 }
