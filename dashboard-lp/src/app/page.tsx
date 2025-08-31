@@ -46,6 +46,10 @@ export default function Home() {
   const [filterTokenAddress, setFilterTokenAddress] = useState<string>('');
   const [withdrawPercentages, setWithdrawPercentages] = useState<{ [pairAddress: string]: number }>({});
   const [bulkWithdrawPercentage, setBulkWithdrawPercentage] = useState<number>(100);
+  const [directWithdrawPairAddress, setDirectWithdrawPairAddress] = useState<string>('');
+  const [directWithdrawPercentage, setDirectWithdrawPercentage] = useState<number>(100);
+  const [directWithdrawStatus, setDirectWithdrawStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
+  const [directWithdrawError, setDirectWithdrawError] = useState<string | null>(null);
 
   // --- KONFIGURASYON ---
   const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://enterprise.onerpc.com/somnia_testnet?apikey=Ku3gV1hlxVE3wPUH5aeLC126NpZfO2Sg";
@@ -423,6 +427,159 @@ export default function Home() {
     }
   };
 
+  const updateSinglePosition = useCallback(async (pairAddress: string) => {
+    console.log(`Updating position for ${pairAddress}...`);
+    try {
+      const provider = new ethers.JsonRpcProvider(RPC_URL);
+      const wallet = new ethers.Wallet(process.env.NEXT_PUBLIC_TEMP_PK!);
+      const factory = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
+      const router = new ethers.Contract(ROUTER_ADDRESS, RouterABI.abi, provider);
+      const PRICE_PRECISION = 30;
+
+      // --- Fiyatlandırma ve ondalık yardımcı fonksiyonları (fetchLpPositions'dan kopyalandı) ---
+      const decimalsCache = new Map<string, number>();
+      const getDecimals = async (tokenAddress: string): Promise<number> => {
+        const address = tokenAddress.toLowerCase();
+        if (decimalsCache.has(address)) return decimalsCache.get(address)!;
+        try {
+          const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, provider);
+          const decimals = await tokenContract.decimals();
+          const decimalsNum = Number(decimals);
+          decimalsCache.set(address, decimalsNum);
+          return decimalsNum;
+        } catch (e) {
+          return 18;
+        }
+      };
+
+      const getBestAmountOut = async (tokenInAddress: string, tokenOutAddress: string, amountIn: bigint): Promise<bigint> => {
+        const routes: string[][] = [
+          [tokenInAddress, tokenOutAddress],
+          [tokenInAddress, USDC_ADDRESS, tokenOutAddress]
+        ];
+        let bestAmountOut = 0n;
+        for (const route of routes) {
+          try {
+            if (route.length === 2) {
+              const pairAddr = await factory.getPair(route[0], route[1]);
+              if (pairAddr === ethers.ZeroAddress) continue;
+            }
+            const amountsOut = await router.getAmountsOut(amountIn, route);
+            const currentAmountOut = amountsOut[amountsOut.length - 1];
+            if (currentAmountOut > bestAmountOut) {
+              bestAmountOut = currentAmountOut;
+            }
+          } catch (error) { }
+        }
+        return bestAmountOut;
+      };
+
+      const priceCache = new Map<string, string>();
+      const getTokenPriceInWSTT = async (tokenAddress: string): Promise<string> => {
+        const address = tokenAddress.toLowerCase();
+        if (address === WSTT_ADDRESS.toLowerCase()) return '1.0';
+        if (priceCache.has(address)) return priceCache.get(address)!;
+        try {
+          const tokenInDecimals = await getDecimals(tokenAddress);
+          const wsttDecimals = await getDecimals(WSTT_ADDRESS);
+          const amountIn = ethers.parseUnits('1', tokenInDecimals);
+          const bestAmountOut = await getBestAmountOut(tokenAddress, WSTT_ADDRESS, amountIn);
+          if (bestAmountOut === 0n) return '0';
+          const priceString = ethers.formatUnits(bestAmountOut, wsttDecimals);
+          priceCache.set(address, priceString);
+          return priceString;
+        } catch (error) {
+          return '0';
+        }
+      };
+      // --- Yardımcı fonksiyonların sonu ---
+
+      const pairContract = new ethers.Contract(pairAddress, PairABI.abi, provider);
+      const balance = await pairContract.balanceOf(wallet.address);
+
+      if (balance === 0n) {
+        // Bakiye sıfırsa, pozisyonu listeden kaldır
+        setPositions(prev => prev.filter(p => p.pairAddress.toLowerCase() !== pairAddress.toLowerCase()));
+        return;
+      }
+
+      const [token0Address, token1Address, reserves, totalSupply] = await Promise.all([
+        pairContract.token0(),
+        pairContract.token1(),
+        pairContract.getReserves(),
+        pairContract.totalSupply()
+      ]);
+
+      const token0Contract = new ethers.Contract(token0Address, ERC20ABI.abi, provider);
+      const token1Contract = new ethers.Contract(token1Address, ERC20ABI.abi, provider);
+      const [token0Symbol, token1Symbol] = await Promise.all([
+        token0Contract.symbol().catch(() => '???'),
+        token1Contract.symbol().catch(() => '???')
+      ]);
+
+      if (BigInt(totalSupply) === 0n) return;
+
+      const bn_balance = BigInt(balance);
+      const bn_totalSupply = BigInt(totalSupply);
+      const bn_reserves0 = BigInt(reserves[0]);
+      const bn_reserves1 = BigInt(reserves[1]);
+
+      const [token0Decimals, token1Decimals] = await Promise.all([
+        getDecimals(token0Address),
+        getDecimals(token1Address)
+      ]);
+      const [price0Str, price1Str] = await Promise.all([
+        getTokenPriceInWSTT(token0Address),
+        getTokenPriceInWSTT(token1Address)
+      ]);
+
+      const token0Price = ethers.parseUnits(price0Str, PRICE_PRECISION);
+      const token1Price = ethers.parseUnits(price1Str, PRICE_PRECISION);
+
+      const poolShare = (bn_balance * 10000n) / bn_totalSupply;
+      const bn_ten = 10n;
+
+      const poolTvl0 = (bn_reserves0 * token0Price) / (bn_ten ** BigInt(token0Decimals));
+      const poolTvl1 = (bn_reserves1 * token1Price) / (bn_ten ** BigInt(token1Decimals));
+      const reliableTotalPoolTvl = poolTvl0 < poolTvl1 ? poolTvl0 * 2n : poolTvl1 * 2n;
+      const positionValueUSD = (reliableTotalPoolTvl * bn_balance) / bn_totalSupply;
+
+      const valueOfEachTokenInUSD = positionValueUSD / 2n;
+      let token0DerivedAmount = 0n;
+      if (token0Price > 0n) {
+        token0DerivedAmount = (valueOfEachTokenInUSD * (bn_ten ** BigInt(token0Decimals))) / token0Price;
+      }
+      let token1DerivedAmount = 0n;
+      if (token1Price > 0n) {
+        token1DerivedAmount = (valueOfEachTokenInUSD * (bn_ten ** BigInt(token1Decimals))) / token1Price;
+      }
+
+      const updatedPosition: LpPosition = {
+        pairAddress,
+        token0: { address: token0Address, symbol: token0Symbol, value: ethers.formatUnits(token0DerivedAmount, token0Decimals) },
+        token1: { address: token1Address, symbol: token1Symbol, value: ethers.formatUnits(token1DerivedAmount, token1Decimals) },
+        lpBalance: ethers.formatEther(balance),
+        poolShare: (Number(poolShare) / 100).toFixed(4),
+        totalValueUSD: ethers.formatUnits(positionValueUSD, PRICE_PRECISION),
+      };
+
+      setPositions(prev => {
+        const index = prev.findIndex(p => p.pairAddress.toLowerCase() === pairAddress.toLowerCase());
+        if (index > -1) {
+          const newPositions = [...prev];
+          newPositions[index] = updatedPosition;
+          return newPositions;
+        }
+        return [...prev, updatedPosition]; // Normalde bu yola girmemeli
+      });
+
+    } catch (error) {
+      console.error(`Failed to update position ${pairAddress}:`, error);
+      // Hata durumunda tüm listeyi yenilemeyi tetikleyebiliriz
+      fetchLpPositions(true);
+    }
+  }, []);
+
   useEffect(() => {
     const pk = process.env.NEXT_PUBLIC_TEMP_PK;
     if (pk) {
@@ -452,7 +609,7 @@ export default function Home() {
     // Yenileme butonu, filtreyi temizleyerek tüm pozisyonları getirir
     setFilterTokenAddress('');
     fetchLpPositions(true, null);
-  }, [fetchLpPositions]);
+  }, []);
 
   const handleFilterByToken = useCallback(() => {
     if (!ethers.isAddress(filterTokenAddress)) {
@@ -460,7 +617,7 @@ export default function Home() {
       return;
     }
     fetchLpPositions(true, filterTokenAddress);
-  }, [fetchLpPositions, filterTokenAddress]);
+  }, [filterTokenAddress]);
 
   const filteredAndSortedPositions = useMemo(() => {
     let filtered = [...positions];
@@ -511,7 +668,6 @@ export default function Home() {
 
     setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'pending' }));
     setTxError(null);
-    const fetchPositions = fetchLpPositions;
 
     try {
       const response = await fetch('/api/withdraw', {
@@ -532,15 +688,69 @@ export default function Home() {
       }
 
       setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'success' }));
-      // Başarılı işlem sonrası listeyi yenile
-      setTimeout(() => fetchPositions(true), 2000);
+      // Başarılı işlem sonrası sadece bu pozisyonu güncelle
+      await updateSinglePosition(position.pairAddress);
 
     } catch (error: any) {
       console.error("Withdraw error:", error);
       setTxError(error.message);
       setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'error' }));
     }
-  }, [fetchLpPositions]);
+  }, [updateSinglePosition]);
+
+  const handleDirectWithdraw = useCallback(async () => {
+    if (!ethers.isAddress(directWithdrawPairAddress)) {
+      setDirectWithdrawError("Lütfen geçerli bir çift adresi (pair address) girin.");
+      setDirectWithdrawStatus('error');
+      return;
+    }
+    if (directWithdrawPercentage <= 0 || directWithdrawPercentage > 100) {
+      setDirectWithdrawError("Geçersiz yüzde değeri. 1 ile 100 arasında olmalıdır.");
+      setDirectWithdrawStatus('error');
+      return;
+    }
+
+    setDirectWithdrawStatus('pending');
+    setDirectWithdrawError(null);
+
+    try {
+      // Token0 ve Token1 adreslerini doğrudan çiftten al
+      const provider = new ethers.JsonRpcProvider(RPC_URL);
+      const pairContract = new ethers.Contract(directWithdrawPairAddress, PairABI.abi, provider);
+      const [token0Address, token1Address] = await Promise.all([
+        pairContract.token0(),
+        pairContract.token1()
+      ]);
+
+      const response = await fetch('/api/withdraw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pairAddress: directWithdrawPairAddress,
+          token0Address: token0Address,
+          token1Address: token1Address,
+          percentage: directWithdrawPercentage,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'İşlem başarısız oldu.');
+      }
+
+      setDirectWithdrawStatus('success');
+      // Eğer bu pozisyon zaten listede varsa, güncelle
+      if (positions.some(p => p.pairAddress.toLowerCase() === directWithdrawPairAddress.toLowerCase())) {
+        await updateSinglePosition(directWithdrawPairAddress);
+      }
+
+    } catch (error: any) {
+      console.error("Direct withdraw error:", error);
+      setDirectWithdrawError(error.message);
+      setDirectWithdrawStatus('error');
+    }
+  }, [directWithdrawPairAddress, directWithdrawPercentage, positions, updateSinglePosition]);
 
   return (
     <main className="flex min-h-screen flex-col items-center p-12 bg-gray-900 text-white">
@@ -669,7 +879,8 @@ export default function Home() {
         </div>
 
         {/* Arama ve Filtreleme Arayüzü */}
-        <div className="mb-6 bg-gray-800 p-4 rounded-lg">
+        <div className="mb-6 bg-gray-800 p-4 rounded-lg space-y-6">
+          {/* Üst Satır Filtreler */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Token Adresine Göre Filtreleme */}
             <div className="md:col-span-2">
@@ -748,6 +959,52 @@ export default function Home() {
               </div>
             </div>
           </div>
+
+          {/* Alt Satır: Doğrudan Çekim */}
+          <div className="border-t border-gray-700 pt-4">
+            <label className="block text-lg font-medium mb-2">Doğrudan Çift Adresinden Çekim</label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-1">Çift Adresi (Pair Address)</label>
+                <input
+                  type="text"
+                  value={directWithdrawPairAddress}
+                  onChange={(e) => setDirectWithdrawPairAddress(e.target.value)}
+                  placeholder="0x..."
+                  className="w-full px-3 py-2 bg-gray-700 rounded text-white placeholder-gray-400 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Çekim Oranı (%)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={directWithdrawPercentage}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value, 10);
+                    setDirectWithdrawPercentage(isNaN(value) ? 0 : value);
+                  }}
+                  className="w-full px-3 py-2 bg-gray-700 rounded text-white"
+                />
+              </div>
+              <div className="md:col-span-3">
+                <button
+                  onClick={handleDirectWithdraw}
+                  disabled={directWithdrawStatus === 'pending' || !directWithdrawPairAddress}
+                  className="w-full bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-bold py-3 px-4 rounded-lg disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed transition-all duration-300 shadow-lg"
+                >
+                  {directWithdrawStatus === 'pending' ? 'İşlem Gönderiliyor...' : 'Çekim Yap'}
+                </button>
+              </div>
+            </div>
+            {directWithdrawStatus === 'error' && directWithdrawError && (
+              <p className="text-red-400 mt-2 text-sm">{directWithdrawError}</p>
+            )}
+            {directWithdrawStatus === 'success' && (
+              <p className="text-green-400 mt-2 text-sm">İşlem başarıyla gönderildi!</p>
+            )}
+          </div>
         </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -818,8 +1075,9 @@ export default function Home() {
                     max="100"
                     value={withdrawPercentages[pos.pairAddress] || ''}
                     onChange={(e) => {
-                      const value = Math.max(0, Math.min(100, Number(e.target.value)));
-                      setWithdrawPercentages(prev => ({ ...prev, [pos.pairAddress]: value }));
+                      const value = parseInt(e.target.value, 10);
+                      const clampedValue = Math.max(0, Math.min(100, isNaN(value) ? 0 : value));
+                      setWithdrawPercentages(prev => ({ ...prev, [pos.pairAddress]: clampedValue }));
                     }}
                     placeholder="Örn: 2"
                     className="w-full px-3 py-2 bg-gray-700 rounded text-white placeholder-gray-400"
@@ -830,8 +1088,8 @@ export default function Home() {
                         key={p}
                         onClick={() => setWithdrawPercentages(prev => ({ ...prev, [pos.pairAddress]: p }))}
                         className={`px-3 py-2 rounded-lg text-xs font-bold transition-colors ${withdrawPercentages[pos.pairAddress] === p
-                            ? 'bg-purple-600 text-white'
-                            : 'bg-gray-600 hover:bg-gray-500 text-gray-300'
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-gray-600 hover:bg-gray-500 text-gray-300'
                           }`}
                       >
                         {p}%

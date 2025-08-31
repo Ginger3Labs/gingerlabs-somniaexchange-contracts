@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { ethers } from 'ethers';
+import clientPromise from '@/lib/mongodb';
 import RouterABI from '@/abis/SomniaExchangeRouter.json';
 import PairABI from '@/abis/SomniaExchangePair.json';
 import ERC20ABI from '@/abis/IERC20.json';
@@ -13,6 +14,9 @@ if (!process.env.NEXT_PUBLIC_RPC_URL) {
 }
 if (!process.env.ROUTER_ADDRESS) {
     throw new Error('ROUTER_ADDRESS ortam değişkeni tanımlanmamış.');
+}
+if (!process.env.MONGODB_DB_NAME) {
+    throw new Error('MONGODB_DB_NAME ortam değişkeni tanımlanmamış.');
 }
 
 
@@ -34,21 +38,45 @@ export async function POST(request: Request) {
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
     const routerContract = new ethers.Contract(ROUTER_ADDRESS, (RouterABI as any).abi, wallet);
-    const pairContract = new ethers.Contract(pairAddress, ERC20ABI.abi, wallet);
+    // PairABI'yi kullanarak daha fazla fonksiyona erişim sağlıyoruz (getReserves, totalSupply)
+    const pairContract = new ethers.Contract(pairAddress, PairABI.abi, wallet);
+    const token0Contract = new ethers.Contract(token0Address, ERC20ABI.abi, provider);
+    const token1Contract = new ethers.Contract(token1Address, ERC20ABI.abi, provider);
 
     try {
-        // 1. Toplam LP miktarını al
+        // Gerekli on-chain verileri çek
         const totalLpBalance = await pairContract.balanceOf(wallet.address);
         if (totalLpBalance === 0n) {
             return NextResponse.json({ success: false, message: 'Çekilecek LP token bulunamadı.' }, { status: 400 });
         }
 
-        // 2. Yüzdeye göre çekilecek miktarı hesapla
-        const amountToWithdraw = (totalLpBalance * BigInt(percentage)) / 100n;
-        console.log(`Toplam Bakiye: ${ethers.formatEther(totalLpBalance)}, Çekilecek Miktar (%${percentage}): ${ethers.formatEther(amountToWithdraw)}`);
+        const [reserves, totalSupply, token0Decimals, token1Decimals] = await Promise.all([
+            pairContract.getReserves(),
+            pairContract.totalSupply(),
+            token0Contract.decimals(),
+            token1Contract.decimals()
+        ]);
+        // getReserves'den dönen değer bir array'dir. Doğru şekilde alalım.
+        const _reserve0: bigint = reserves[0];
+        const _reserve1: bigint = reserves[1];
 
+        // --- İşlem Öncesi Hesaplamalar (Tümü BigInt ile) ---
+        const userToken0BalanceBefore: bigint = (_reserve0 * totalLpBalance) / totalSupply;
+        const userToken1BalanceBefore: bigint = (_reserve1 * totalLpBalance) / totalSupply;
 
-        // 3. Router'a harcama onayı (approve) ver
+        // Yüzdeye göre çekilecek miktarı hesapla
+        const amountToWithdraw = (totalLpBalance * BigInt(Math.floor(percentage))) / 100n;
+        console.log(`Toplam Bakiye: ${ethers.formatUnits(totalLpBalance, 18)}, Çekilecek Miktar (%${percentage}): ${ethers.formatUnits(amountToWithdraw, 18)}`);
+
+        // Çekilecek token miktarlarını hesapla (Tümü BigInt ile)
+        // Hassasiyet kaybını önlemek için önce çarpma
+        const withdrawnToken0: bigint = (userToken0BalanceBefore * amountToWithdraw) / totalLpBalance;
+        const withdrawnToken1: bigint = (userToken1BalanceBefore * amountToWithdraw) / totalLpBalance;
+        
+        // Yüzde hesaplamalarını Number'a çevirerek en son yap
+        const poolShareBefore = (Number(totalLpBalance) / Number(totalSupply)) * 100;
+
+        // Router'a harcama onayı (approve) ver
         const allowance = await pairContract.allowance(wallet.address, ROUTER_ADDRESS);
         if (allowance < amountToWithdraw) {
             console.log('Onay veriliyor...');
@@ -73,8 +101,63 @@ export async function POST(request: Request) {
             deadline
         );
 
-        await removeTx.wait();
+        const receipt = await removeTx.wait();
         console.log('Likidite başarıyla çekildi:', removeTx.hash);
+
+        // İşlem sonrası yeni bakiye ve havuz durumu
+        const newLpBalance = await pairContract.balanceOf(wallet.address);
+        const newTotalSupply = await pairContract.totalSupply(); // Bu işlem sonrası güncellenmiş olacak
+
+        // --- İşlem Sonrası Hesaplamalar ---
+        const poolShareAfter = newTotalSupply > 0n ? (Number(newLpBalance) / Number(newTotalSupply)) * 100 : 0;
+        const userToken0BalanceAfter = userToken0BalanceBefore - withdrawnToken0;
+        const userToken1BalanceAfter = userToken1BalanceBefore - withdrawnToken1;
+
+        // Veritabanına log kaydet
+        try {
+            const client = await clientPromise;
+            const db = client.db(process.env.MONGODB_DB_NAME);
+            const collection = db.collection('withdrawals');
+
+            const logEntry = {
+                timestamp: new Date(),
+                walletAddress: wallet.address,
+                pairAddress,
+                txHash: removeTx.hash,
+                blockNumber: receipt.blockNumber,
+                details: {
+                    percentage,
+                    lp: {
+                        balanceBefore: ethers.formatUnits(totalLpBalance, 18),
+                        withdrawn: ethers.formatUnits(amountToWithdraw, 18),
+                        balanceAfter: ethers.formatUnits(newLpBalance, 18),
+                    },
+                    poolShare: {
+                        before: `${poolShareBefore.toFixed(6)}%`,
+                        after: `${poolShareAfter.toFixed(6)}%`,
+                    },
+                    token0: {
+                        address: token0Address,
+                        balanceBefore: ethers.formatUnits(userToken0BalanceBefore, token0Decimals),
+                        withdrawn: ethers.formatUnits(withdrawnToken0, token0Decimals),
+                        balanceAfter: ethers.formatUnits(userToken0BalanceAfter, token0Decimals),
+                    },
+                    token1: {
+                        address: token1Address,
+                        balanceBefore: ethers.formatUnits(userToken1BalanceBefore, token1Decimals),
+                        withdrawn: ethers.formatUnits(withdrawnToken1, token1Decimals),
+                        balanceAfter: ethers.formatUnits(userToken1BalanceAfter, token1Decimals),
+                    }
+                }
+            };
+
+            await collection.insertOne(logEntry);
+            console.log('İşlem logu veritabanına kaydedildi.');
+
+        } catch (dbError) {
+            console.error('Veritabanına yazma hatası:', dbError);
+            // DB hatası ana işlemi etkilememeli, sadece loglanır.
+        }
 
         return NextResponse.json({ success: true, txHash: removeTx.hash });
 
