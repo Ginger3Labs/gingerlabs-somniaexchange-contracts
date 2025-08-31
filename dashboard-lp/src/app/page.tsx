@@ -6,6 +6,7 @@ import FactoryABI from '@/abis/SomniaExchangeFactory.json';
 import PairABI from '@/abis/SomniaExchangePair.json';
 import ERC20ABI from '@/abis/IERC20.json';
 import RouterABI from '@/abis/SomniaExchangeRouter.json';
+import { formatToDecimals } from '../../format';
 
 // Arayüz için veri tipleri
 interface LpPosition {
@@ -677,7 +678,8 @@ export default function Home() {
           pairAddress: position.pairAddress,
           token0Address: position.token0.address,
           token1Address: position.token1.address,
-          percentage: percentage, // Yüzdeyi API'ye gönder
+          percentage: percentage,
+          totalValueUSD: parseFloat(position.totalValueUSD) // USD değerini de gönder
         }),
       });
 
@@ -769,7 +771,7 @@ export default function Home() {
                 {totalPortfolioValue > 0 && (
                   <div className="flex items-center gap-2">
                     <span className="text-gray-400">Toplam Varlık:</span>
-                    <span className="text-2xl font-bold text-green-400">${totalPortfolioValue.toFixed(2)}</span>
+                    <span className="text-2xl font-bold text-green-400">${formatToDecimals(totalPortfolioValue)}</span>
                   </div>
                 )}
                 {cacheTimestamp && (
@@ -1034,7 +1036,7 @@ export default function Home() {
                   <p className="text-xs text-gray-400 font-mono break-all">{pos.pairAddress}</p>
                 </div>
                 <div className="text-right">
-                  <span className="text-2xl font-bold text-green-400">${Number(pos.totalValueUSD).toFixed(2)}</span>
+                  <span className="text-2xl font-bold text-green-400">${formatToDecimals(Number(pos.totalValueUSD))}</span>
                 </div>
               </div>
 
@@ -1042,7 +1044,7 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div className="bg-gray-700/50 p-3 rounded-lg">
                   <p className="text-sm text-gray-400">LP Miktarı</p>
-                  <p className="text-lg font-semibold">{parseFloat(pos.lpBalance).toFixed(4)}</p>
+                  <p className="text-lg font-semibold">{formatToDecimals(parseFloat(pos.lpBalance))}</p>
                 </div>
                 <div className="bg-gray-700/50 p-3 rounded-lg">
                   <p className="text-sm text-gray-400">Havuz Payı</p>

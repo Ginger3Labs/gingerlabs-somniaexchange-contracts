@@ -25,10 +25,10 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS;
 
 export async function POST(request: Request) {
-    const { pairAddress, token0Address, token1Address, percentage } = await request.json();
+    const { pairAddress, token0Address, token1Address, percentage, totalValueUSD } = await request.json();
 
-    if (!pairAddress || !token0Address || !token1Address || !percentage) {
-        return NextResponse.json({ success: false, message: 'Eksik parametreler: pairAddress, token0Address, token1Address ve percentage gereklidir.' }, { status: 400 });
+    if (!pairAddress || !token0Address || !token1Address || !percentage || totalValueUSD === undefined) {
+        return NextResponse.json({ success: false, message: 'Eksik parametreler: pairAddress, token0Address, token1Address, percentage ve totalValueUSD gereklidir.' }, { status: 400 });
     }
 
     if (typeof percentage !== 'number' || percentage <= 0 || percentage > 100) {
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
         // Hassasiyet kaybını önlemek için önce çarpma
         const withdrawnToken0: bigint = (userToken0BalanceBefore * amountToWithdraw) / totalLpBalance;
         const withdrawnToken1: bigint = (userToken1BalanceBefore * amountToWithdraw) / totalLpBalance;
-        
+
         // Yüzde hesaplamalarını Number'a çevirerek en son yap
         const poolShareBefore = (Number(totalLpBalance) / Number(totalSupply)) * 100;
 
@@ -113,6 +113,12 @@ export async function POST(request: Request) {
         const userToken0BalanceAfter = userToken0BalanceBefore - withdrawnToken0;
         const userToken1BalanceAfter = userToken1BalanceBefore - withdrawnToken1;
 
+        // USD Değer Hesaplamaları
+        const valueBeforeUSD = totalValueUSD;
+        const withdrawnValueUSD = valueBeforeUSD * (percentage / 100);
+        const valueAfterUSD = valueBeforeUSD - withdrawnValueUSD;
+
+
         // Veritabanına log kaydet
         try {
             const client = await clientPromise;
@@ -127,6 +133,11 @@ export async function POST(request: Request) {
                 blockNumber: receipt.blockNumber,
                 details: {
                     percentage,
+                    totalValueUSD: {
+                        before: valueBeforeUSD.toFixed(4),
+                        withdrawn: withdrawnValueUSD.toFixed(4),
+                        after: valueAfterUSD.toFixed(4),
+                    },
                     lp: {
                         balanceBefore: ethers.formatUnits(totalLpBalance, 18),
                         withdrawn: ethers.formatUnits(amountToWithdraw, 18),
