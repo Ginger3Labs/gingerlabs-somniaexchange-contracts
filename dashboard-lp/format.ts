@@ -11,13 +11,14 @@ export const formatToDecimals = (inputNumber: number) => {
     if (inputNumber === 0) return "0";
 
     // For very large numbers (>= 10000), show no decimals (truncate, don't round)
-    if (Math.abs(inputNumber) >= 10000) {
+    if (Math.abs(inputNumber) >= 1000) {
         const truncated = truncateToDecimalPlaces(inputNumber, 0);
         return new Intl.NumberFormat('tr-TR', {
             minimumFractionDigits: 0,
             maximumFractionDigits: 0
         }).format(truncated);
     }
+
 
     // For very small numbers (< 0.001), show as "0.000<1"
     if (Math.abs(inputNumber) < 0.001) {
@@ -42,6 +43,7 @@ export const formatToDecimals = (inputNumber: number) => {
             maximumFractionDigits: 4
         }).format(truncated);
     }
+
 
     // For numbers between 0.0001 and 0.01, show up to 6 decimals (truncate)
     const truncated = truncateToDecimalPlaces(inputNumber, 6);

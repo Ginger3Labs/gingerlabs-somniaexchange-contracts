@@ -18,13 +18,13 @@ const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL!;
 const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS!;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
-const WSTT_ADDRESS = process.env.NEXT_PUBLIC_WSTT_ADDRESS!;
+const TARGET_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TARGET_TOKEN_ADDRESS!;
 
 export async function POST(request: Request) {
-    const { pairAddress, token0Address, token1Address, percentage, totalValueUSD } = await request.json();
+    const { pairAddress, token0Address, token1Address, percentage, totalValueUSD, targetTokenAddress } = await request.json();
 
-    if (!pairAddress || !token0Address || !token1Address || !percentage || totalValueUSD === undefined) {
-        return NextResponse.json({ success: false, message: 'Eksik parametreler: pairAddress, token0Address, token1Address, percentage ve totalValueUSD gereklidir.' }, { status: 400 });
+    if (!pairAddress || !token0Address || !token1Address || !percentage || totalValueUSD === undefined || !targetTokenAddress) {
+        return NextResponse.json({ success: false, message: 'Eksik parametreler: pairAddress, token0Address, token1Address, percentage, totalValueUSD ve targetTokenAddress gereklidir.' }, { status: 400 });
     }
 
     if (typeof percentage !== 'number' || percentage <= 0 || percentage > 100) {
@@ -88,23 +88,26 @@ export async function POST(request: Request) {
         console.log(`Alınan Token0 Miktarı: ${ethers.formatUnits(receivedToken0Amount, token0Decimals)}`);
         console.log(`Alınan Token1 Miktarı: ${ethers.formatUnits(receivedToken1Amount, token1Decimals)}`);
 
-        // --- ADIM 5: Alınan Tokenları WSTT'ye Çevir ---
+        // --- ADIM 5: Alınan Tokenları Hedef Token'a Çevir ---
         const swapResults = [];
-        let totalWSTTReceived = 0n;
+        let totalTargetTokenReceived = 0n;
 
-        const swapTokenToWSTT = async (tokenAddress: string, amount: bigint) => {
+        const swapTokenToTarget = async (tokenAddress: string, amount: bigint) => {
             if (amount === 0n) return null;
-            if (tokenAddress.toLowerCase() === WSTT_ADDRESS.toLowerCase()) {
-                totalWSTTReceived += amount;
+            if (tokenAddress.toLowerCase() === targetTokenAddress.toLowerCase()) {
+                totalTargetTokenReceived += amount;
                 return { skipped: true, amount: ethers.formatUnits(amount, 18) };
             }
 
             const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, wallet);
+            const targetTokenContract = new ethers.Contract(targetTokenAddress, ERC20ABI.abi, provider);
+            const targetTokenDecimals = await targetTokenContract.decimals();
 
-            console.log(`[Anlık Mod] ${tokenAddress} için en hızlı WSTT rotası aranıyor...`);
+
+            console.log(`[Anlık Mod] ${tokenAddress} için en hızlı ${targetTokenAddress} rotası aranıyor...`);
             const { amount: bestAmountOut, path: bestPath } = await getBestAmountOut(
                 tokenAddress,
-                WSTT_ADDRESS,
+                targetTokenAddress,
                 amount,
                 ROUTER_ADDRESS,
                 FACTORY_ADDRESS,
@@ -112,11 +115,11 @@ export async function POST(request: Request) {
             );
 
             if (bestAmountOut === 0n || bestPath.length === 0) {
-                console.log(`${tokenAddress} için WSTT'ye giden bir rota bulunamadı.`);
+                console.log(`${tokenAddress} için ${targetTokenAddress}'e giden bir rota bulunamadı.`);
                 return { error: "Rota bulunamadı", amountIn: ethers.formatUnits(amount, await tokenContract.decimals()) };
             }
 
-            console.log(`Kullanılacak rota: ${bestPath.join(' -> ')} | Beklenen WSTT: ${ethers.formatUnits(bestAmountOut, 18)}`);
+            console.log(`Kullanılacak rota: ${bestPath.join(' -> ')} | Beklenen Hedef Token: ${ethers.formatUnits(bestAmountOut, targetTokenDecimals)}`);
 
             // Onay ve Swap
             const approveTx = await tokenContract.approve(ROUTER_ADDRESS, amount);
@@ -127,22 +130,22 @@ export async function POST(request: Request) {
             );
             await swapTx.wait();
 
-            totalWSTTReceived += bestAmountOut;
+            totalTargetTokenReceived += bestAmountOut;
 
             return {
                 txHash: swapTx.hash,
                 path: bestPath.join(' -> '),
                 amountIn: ethers.formatUnits(amount, await tokenContract.decimals()),
-                amountOut: ethers.formatUnits(bestAmountOut, 18),
+                amountOut: ethers.formatUnits(bestAmountOut, await targetTokenContract.decimals()),
             };
         };
 
         if (receivedToken0Amount > 0n) {
-            const result = await swapTokenToWSTT(token0Address, receivedToken0Amount);
+            const result = await swapTokenToTarget(token0Address, receivedToken0Amount);
             swapResults.push({ token: token0Address, ...result });
         }
         if (receivedToken1Amount > 0n) {
-            const result = await swapTokenToWSTT(token1Address, receivedToken1Amount);
+            const result = await swapTokenToTarget(token1Address, receivedToken1Amount);
             swapResults.push({ token: token1Address, ...result });
         }
 
@@ -179,7 +182,7 @@ export async function POST(request: Request) {
                         after: `${poolShareAfter.toFixed(6)}%`,
                     },
                     swaps: swapResults,
-                    finalWSTTReceived: ethers.formatUnits(totalWSTTReceived, 18)
+                    finalTargetTokenReceived: ethers.formatUnits(totalTargetTokenReceived, await (new ethers.Contract(targetTokenAddress, ERC20ABI.abi, provider)).decimals())
                 }
             };
             await collection.insertOne(logEntry);
@@ -188,11 +191,14 @@ export async function POST(request: Request) {
             console.error('Veritabanına yazma hatası:', dbError);
         }
 
+        const targetTokenContract = new ethers.Contract(targetTokenAddress, ERC20ABI.abi, provider);
+        const targetTokenDecimals = await targetTokenContract.decimals();
+
         return NextResponse.json({
             success: true,
             removeLiquidityTxHash: removeTx.hash,
             swaps: swapResults,
-            totalWSTTReceived: ethers.formatUnits(totalWSTTReceived, 18)
+            totalTargetTokenReceived: ethers.formatUnits(totalTargetTokenReceived, targetTokenDecimals)
         });
 
     } catch (error: any) {

@@ -10,7 +10,7 @@ const MONGO_DB_NAME = process.env.MONGODB_DB_NAME;
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL;
 const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS;
-const WSTT_ADDRESS = process.env.NEXT_PUBLIC_WSTT_ADDRESS;
+const TARGET_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TARGET_TOKEN_ADDRESS;
 const WALLET_TO_CHECK = process.env.NEXT_PUBLIC_WALLET_ADDRESS;
 const NEXT_PUBLIC_TRACKED_TOKEN_ADDRESSES = process.env.NEXT_PUBLIC_TRACKED_TOKEN_ADDRESSES || '';
 
@@ -153,25 +153,25 @@ async function main() {
 
         const getTokenPriceSimple = async (tokenAddress) => {
             const address = tokenAddress.toLowerCase();
-            if (address === WSTT_ADDRESS.toLowerCase()) return { price: '1.0', route: [WSTT_ADDRESS] };
+            if (address === TARGET_TOKEN_ADDRESS.toLowerCase()) return { price: '1.0', route: [TARGET_TOKEN_ADDRESS] };
             if (priceCacheSimple.has(address)) return priceCacheSimple.get(address);
 
             try {
                 const tokenInDecimals = await getDecimals(tokenAddress);
                 const amountIn = ethers.parseUnits('1', tokenInDecimals);
-                const { amount: bestAmountOut } = await getBestAmountOut(tokenAddress, WSTT_ADDRESS, amountIn, router, factory);
+                const { amount: bestAmountOut } = await getBestAmountOut(tokenAddress, TARGET_TOKEN_ADDRESS, amountIn, router, factory);
 
                 if (bestAmountOut === 0n) {
                     priceCacheSimple.set(address, { price: '0', route: [] });
                     return { price: '0', route: [] };
                 }
-                const wsttDecimals = await getDecimals(WSTT_ADDRESS);
-                const priceString = ethers.formatUnits(bestAmountOut, wsttDecimals);
+                const targetTokenDecimals = await getDecimals(TARGET_TOKEN_ADDRESS);
+                const priceString = ethers.formatUnits(bestAmountOut, targetTokenDecimals);
                 const result = { price: priceString, route: [] };
                 priceCacheSimple.set(address, result);
                 return result;
             } catch (error) {
-                console.error(`Failed to get price for ${tokenAddress} in WSTT:`, error);
+                console.error(`Failed to get price for ${tokenAddress} in Target Token:`, error);
                 return { price: '0', route: [] };
             }
         };
@@ -210,25 +210,30 @@ async function main() {
                     const poolTvl0 = (bn_reserves0 * token0Price) / (bn_ten ** BigInt(token0Decimals));
                     const poolTvl1 = (bn_reserves1 * token1Price) / (bn_ten ** BigInt(token1Decimals));
                     const reliableTotalPoolTvl = poolTvl0 < poolTvl1 ? poolTvl0 * 2n : poolTvl1 * 2n;
-                    const positionValueWSTT = (reliableTotalPoolTvl * bn_balance) / bn_totalSupply;
+                    const positionValueInTargetToken = (reliableTotalPoolTvl * bn_balance) / bn_totalSupply;
 
-                    totalPortfolioValueBigInt += positionValueWSTT;
+                    totalPortfolioValueBigInt += positionValueInTargetToken;
                 }
             } catch (e) {
                 console.warn(`Could not process pair at index ${i}. Error: ${e.message}`);
             }
         }
 
-        const wsttDecimals = await getDecimals(WSTT_ADDRESS);
-        const totalAssetsValue = ethers.formatUnits(totalPortfolioValueBigInt, PRICE_PRECISION);
-        const totalAssetsValueFormatted = ethers.formatUnits(ethers.parseUnits(totalAssetsValue, wsttDecimals), wsttDecimals);
+        const targetTokenContract = new ethers.Contract(TARGET_TOKEN_ADDRESS, ERC20ABI.abi, provider);
+        const [targetTokenDecimals, targetTokenSymbol] = await Promise.all([
+            getDecimals(TARGET_TOKEN_ADDRESS),
+            targetTokenContract.symbol()
+        ]);
 
-        console.log(`LP calculation complete. Total LP Value: ${totalAssetsValueFormatted} WSTT`);
+        const totalAssetsValue = ethers.formatUnits(totalPortfolioValueBigInt, PRICE_PRECISION);
+        const totalAssetsValueFormatted = ethers.formatUnits(ethers.parseUnits(totalAssetsValue, targetTokenDecimals), targetTokenDecimals);
+
+        console.log(`LP calculation complete. Total LP Value: ${totalAssetsValueFormatted} ${targetTokenSymbol}`);
 
         const lpAssetsCollection = db.collection('totalAssetsHistory');
         const lpAssets = {
             value: totalAssetsValueFormatted,
-            unit: 'WSTT',
+            unit: targetTokenSymbol,
             type: 'LP_PORTFOLIO',
             timestamp: new Date(),
         };
