@@ -59,6 +59,7 @@ export default function Home() {
   });
   const [trackedBalances, setTrackedBalances] = useState<TrackedTokenBalance[]>([]);
   const [targetTokenSymbol, setTargetTokenSymbol] = useState<string>('');
+  const [factoryInfo, setFactoryInfo] = useState<{ feeTo: string; feeToSetter: string; protocolFeeStatus: 'Açık' | 'Kapalı' | 'Yükleniyor...'; totalPairs: number }>({ feeTo: '', feeToSetter: '', protocolFeeStatus: 'Yükleniyor...', totalPairs: 0 });
   const isScanningRef = useRef(false);
   const router = useRouter();
 
@@ -355,12 +356,35 @@ export default function Home() {
     }
   }, [provider, WALLET_TO_CHECK]);
 
+  const fetchFactoryInfo = useCallback(async () => {
+    if (!FACTORY_ADDRESS || !provider) return;
+    try {
+      const factoryContract = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
+      const [feeTo, feeToSetter, allPairsLength] = await Promise.all([
+        factoryContract.feeTo(),
+        factoryContract.feeToSetter(),
+        factoryContract.allPairsLength()
+      ]);
+      const nullAddress = "0x0000000000000000000000000000000000000000";
+      setFactoryInfo({
+        feeTo,
+        feeToSetter,
+        protocolFeeStatus: feeTo === nullAddress ? 'Kapalı' : 'Açık',
+        totalPairs: Number(allPairsLength)
+      });
+    } catch (error) {
+      console.error("Fabrika bilgileri alınamadı:", error);
+      setFactoryInfo({ feeTo: 'Hata', feeToSetter: 'Hata', protocolFeeStatus: 'Kapalı', totalPairs: 0 });
+    }
+  }, [provider, FACTORY_ADDRESS]);
+
   useEffect(() => {
     if (WALLET_TO_CHECK) {
       fetchLpPositions(false);
       fetchTrackedBalances();
+      fetchFactoryInfo();
     }
-  }, [fetchLpPositions, fetchTrackedBalances, WALLET_TO_CHECK]);
+  }, [fetchLpPositions, fetchTrackedBalances, fetchFactoryInfo, WALLET_TO_CHECK]);
 
   const handleRefresh = useCallback(() => {
     fetchLpPositions(true);
@@ -631,6 +655,44 @@ export default function Home() {
                   <span className="text-lg text-white/90">{new Date(cacheTimestamp).toLocaleString()}</span>
                 </div>
               )}
+
+              {/* Factory Info Card */}
+              <div className="bg-gray-900/30 rounded-xl p-4 border border-gray-700/30 col-span-1 md:col-span-2 lg:col-span-4">
+                <div className="flex items-center gap-3 mb-4">
+                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                  <span className="text-gray-400 text-lg">Protokol Bilgileri</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+                  <div className="bg-gray-800/50 p-3 rounded-lg">
+                    <span className="block text-gray-400 mb-1">Toplam Likidite Havuzu</span>
+                    <span className="font-mono text-white/90 text-lg">{factoryInfo.totalPairs}</span>
+                  </div>
+                  <div className="bg-gray-800/50 p-3 rounded-lg">
+                    <span className="block text-gray-400 mb-1">Protokol Komisyonu</span>
+                    <span className={`font-medium ${factoryInfo.protocolFeeStatus === 'Açık' ? 'text-green-400' : 'text-red-400'}`}>
+                      {factoryInfo.protocolFeeStatus}
+                    </span>
+                  </div>
+                  <div className="bg-gray-800/50 p-3 rounded-lg">
+                    <span className="block text-gray-400 mb-1">Komisyon Alıcısı (feeTo)</span>
+                    <span className="font-mono text-white/90 break-all">{factoryInfo.feeTo}</span>
+                  </div>
+                  <div className="bg-gray-800/50 p-3 rounded-lg">
+                    <span className="block text-gray-400 mb-1">Yetkili Adres (feeToSetter)</span>
+                    <span className="font-mono text-white/90 break-all">{factoryInfo.feeToSetter}</span>
+                  </div>
+                  <div className="bg-gray-800/50 p-3 rounded-lg md:col-span-1 lg:col-span-1">
+                    <span className="block text-gray-400 mb-1">Factory Kontratı</span>
+                    <span className="font-mono text-white/90 break-all">{FACTORY_ADDRESS}</span>
+                  </div>
+                  <div className="bg-gray-800/50 p-3 rounded-lg md:col-span-1 lg:col-span-1">
+                    <span className="block text-gray-400 mb-1">Router Kontratı</span>
+                    <span className="font-mono text-white/90 break-all">{ROUTER_ADDRESS}</span>
+                  </div>
+                </div>
+              </div>
 
               {/* Tracked Assets Summary */}
               {trackedBalances.length > 0 && (
