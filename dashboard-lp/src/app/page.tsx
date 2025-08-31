@@ -700,6 +700,14 @@ export default function Home() {
                     <span className="block text-gray-400 mb-1">Wrapped Token (WSTT)</span>
                     <span className="font-mono text-white/90 break-all">{factoryInfo.wrappedTokenAddress}</span>
                   </div>
+                  <div className="bg-gray-800/50 p-3 rounded-lg md:col-span-1 lg:col-span-1">
+                    <span className="block text-gray-400 mb-1">Factory Kontratı</span>
+                    <span className="font-mono text-white/90 break-all">{FACTORY_ADDRESS}</span>
+                  </div>
+                  <div className="bg-gray-800/50 p-3 rounded-lg md:col-span-1 lg:col-span-1">
+                    <span className="block text-gray-400 mb-1">Router Kontratı</span>
+                    <span className="font-mono text-white/90 break-all">{ROUTER_ADDRESS}</span>
+                  </div>
                 </div>
               </div>
 
