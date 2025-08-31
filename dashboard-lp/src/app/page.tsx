@@ -58,6 +58,7 @@ export default function Home() {
   const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
   const WSTT_ADDRESS = process.env.NEXT_PUBLIC_WSTT_ADDRESS!;
   const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
+  const WALLET_TO_CHECK = process.env.NEXT_PUBLIC_WALLET_ADDRESS!;
   // --- BİTİŞ ---
 
   const fetchLpPositions = async (forceRefresh = false, filterToken: string | null = null) => {
@@ -83,13 +84,12 @@ export default function Home() {
       }
     }
 
-    // .env.local kontrolü
-    if (!process.env.NEXT_PUBLIC_TEMP_PK) {
-      throw new Error('Yapılandırma hatası: .env.local dosyasında NEXT_PUBLIC_TEMP_PK değişkeni bulunamadı. Lütfen dosyayı oluşturup sunucuyu yeniden başlatın.');
+    // .env kontrolü
+    if (!WALLET_TO_CHECK) {
+      throw new Error('Yapılandırma hatası: .env dosyasında NEXT_PUBLIC_WALLET_ADDRESS değişkeni bulunamadı.');
     }
 
-    const wallet = new ethers.Wallet(process.env.NEXT_PUBLIC_TEMP_PK);
-    const walletAddress = wallet.address;
+    const walletAddress = WALLET_TO_CHECK;
     setSignerAddress(walletAddress);
 
     const currentCacheKey = `${CACHE_KEY_PREFIX}${walletAddress}`;
@@ -431,7 +431,7 @@ export default function Home() {
     console.log(`Updating position for ${pairAddress}...`);
     try {
       const provider = new ethers.JsonRpcProvider(RPC_URL);
-      const wallet = new ethers.Wallet(process.env.NEXT_PUBLIC_TEMP_PK!);
+      const walletAddress = process.env.NEXT_PUBLIC_WALLET_ADDRESS!;
       const factory = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
       const router = new ethers.Contract(ROUTER_ADDRESS, RouterABI.abi, provider);
       const PRICE_PRECISION = 30;
@@ -495,7 +495,7 @@ export default function Home() {
       // --- Yardımcı fonksiyonların sonu ---
 
       const pairContract = new ethers.Contract(pairAddress, PairABI.abi, provider);
-      const balance = await pairContract.balanceOf(wallet.address);
+      const balance = await pairContract.balanceOf(walletAddress);
 
       if (balance === 0n) {
         // Bakiye sıfırsa, pozisyonu listeden kaldır
@@ -581,10 +581,9 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const pk = process.env.NEXT_PUBLIC_TEMP_PK;
-    if (pk) {
-      const wallet = new ethers.Wallet(pk);
-      const key = `${CACHE_KEY_PREFIX}${wallet.address}`;
+    const walletAddress = process.env.NEXT_PUBLIC_WALLET_ADDRESS;
+    if (walletAddress) {
+      const key = `${CACHE_KEY_PREFIX}${walletAddress}`;
 
       const cachedItem = localStorage.getItem(key);
       if (cachedItem) {
