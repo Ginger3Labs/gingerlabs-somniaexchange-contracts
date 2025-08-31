@@ -64,10 +64,42 @@ export default function Home() {
   const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
   const WALLET_TO_CHECK = process.env.NEXT_PUBLIC_WALLET_ADDRESS!;
 
+  const provider = useMemo(() => new ethers.JsonRpcProvider(RPC_URL), [RPC_URL]);
+
+  useEffect(() => {
+    const fetchMissingSymbols = async () => {
+      const allRoutes = positions.flatMap(p => [...(p.token0.route || []), ...(p.token1.route || [])]);
+      const uniqueAddresses = [...new Set(allRoutes)].filter(addr => addr);
+      
+      const missingSymbols = uniqueAddresses.filter(addr => !tokenSymbolMap.has(addr.toLowerCase()));
+
+      if (missingSymbols.length > 0) {
+        const newSymbols = new Map<string, string>();
+        await Promise.all(missingSymbols.map(async (addr) => {
+          try {
+            const tokenContract = new ethers.Contract(addr, ERC20ABI.abi, provider);
+            const symbol = await tokenContract.symbol();
+            newSymbols.set(addr.toLowerCase(), symbol);
+          } catch (e) {
+            // Sembol alınamazsa adresi kısaltarak ekle
+            newSymbols.set(addr.toLowerCase(), addr.slice(0, 6));
+          }
+        }));
+
+        if (newSymbols.size > 0) {
+          setTokenSymbolMap(prevMap => new Map([...prevMap, ...newSymbols]));
+        }
+      }
+    };
+
+    if (positions.length > 0) {
+      fetchMissingSymbols();
+    }
+  }, [positions, provider, tokenSymbolMap]);
+
   const buildRoutesAndReprice = useCallback(async (initialPositions: LpPosition[]) => {
     if (isAnalyzing) return;
     setIsAnalyzing(true);
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
     const factory = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
     const router = new ethers.Contract(ROUTER_ADDRESS, RouterABI.abi, provider);
     const PRICE_PRECISION = 30;
@@ -248,7 +280,6 @@ export default function Home() {
     }
 
     try {
-      const provider = new ethers.JsonRpcProvider(RPC_URL);
       const factory = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
       const router = new ethers.Contract(ROUTER_ADDRESS, RouterABI.abi, provider);
       const PRICE_PRECISION = 30;
@@ -501,7 +532,6 @@ export default function Home() {
     setDirectWithdrawStatus('pending');
     setDirectWithdrawError(null);
     try {
-      const provider = new ethers.JsonRpcProvider(RPC_URL);
       const pairContract = new ethers.Contract(directWithdrawPairAddress, PairABI.abi, provider);
       const [token0Address, token1Address] = await Promise.all([
         pairContract.token0(),
