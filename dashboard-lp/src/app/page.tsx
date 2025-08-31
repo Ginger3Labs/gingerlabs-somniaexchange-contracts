@@ -366,10 +366,14 @@ export default function Home() {
   }, [fetchLpPositions, fetchTrackedBalances]);
 
   const handleHardRefresh = useCallback(() => {
-    console.log("Performing a hard refresh by reloading the page...");
-    // Tüm state'i ve çalışan işlemleri sıfırlamanın en kesin yolu sayfayı yeniden yüklemektir.
+    console.log("Performing a hard refresh by clearing cache and reloading...");
+    // Önbelleği temizle
+    const currentCacheKey = `${CACHE_KEY_PREFIX}${WALLET_TO_CHECK}_${TARGET_TOKEN_ADDRESS}`;
+    localStorage.removeItem(currentCacheKey);
+    localStorage.removeItem('tokenSymbolMapCache');
+    // Sayfayı yeniden yükle
     window.location.reload();
-  }, []);
+  }, [WALLET_TO_CHECK, TARGET_TOKEN_ADDRESS]);
 
   const filteredAndSortedPositions = useMemo(() => {
     let filtered = [...positions];
