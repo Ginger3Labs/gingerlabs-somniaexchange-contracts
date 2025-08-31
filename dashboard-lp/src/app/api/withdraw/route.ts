@@ -4,8 +4,7 @@ import clientPromise from '@/lib/mongodb';
 import RouterABI from '@/abis/SomniaExchangeRouter.json';
 import PairABI from '@/abis/SomniaExchangePair.json';
 import ERC20ABI from '@/abis/IERC20.json';
-import { buildTradingGraph, getBestAmountOut, TradingGraph } from '@/lib/pathfinder';
-import { getCachedGraph, setCachedGraph } from '@/lib/cache';
+import { getBestAmountOut } from '@/lib/pathfinder';
 
 // Gerekli ortam değişkenlerini kontrol et
 if (!process.env.PRIVATE_KEY) throw new Error('PRIVATE_KEY ortam değişkeni tanımlanmamış.');
@@ -20,8 +19,6 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS!;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
 const WSTT_ADDRESS = process.env.NEXT_PUBLIC_WSTT_ADDRESS!;
-const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
-
 
 export async function POST(request: Request) {
     const { pairAddress, token0Address, token1Address, percentage, totalValueUSD } = await request.json();
@@ -54,11 +51,6 @@ export async function POST(request: Request) {
             token0Contract.decimals(),
             token1Contract.decimals()
         ]);
-        const _reserve0: bigint = reserves[0];
-        const _reserve1: bigint = reserves[1];
-
-        const userToken0BalanceBefore: bigint = (_reserve0 * totalLpBalance) / totalSupply;
-        const userToken1BalanceBefore: bigint = (_reserve1 * totalLpBalance) / totalSupply;
 
         const amountToWithdraw = (totalLpBalance * BigInt(Math.floor(percentage))) / 100n;
         console.log(`Toplam Bakiye: ${ethers.formatUnits(totalLpBalance, 18)}, Çekilecek Miktar (%${percentage}): ${ethers.formatUnits(amountToWithdraw, 18)}`);
@@ -100,10 +92,7 @@ export async function POST(request: Request) {
         const swapResults = [];
         let totalWSTTReceived = 0n;
 
-        // Cache'i en başta bir kere oku
-        const tradingGraph = await getCachedGraph();
-
-        const swapTokenToWSTT = async (tokenAddress: string, amount: bigint, graph: TradingGraph | null) => {
+        const swapTokenToWSTT = async (tokenAddress: string, amount: bigint) => {
             if (amount === 0n) return null;
             if (tokenAddress.toLowerCase() === WSTT_ADDRESS.toLowerCase()) {
                 totalWSTTReceived += amount;
@@ -111,36 +100,16 @@ export async function POST(request: Request) {
             }
 
             const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, wallet);
-            let bestAmountOut = 0n;
-            let bestPath: string[] = [];
 
-            if (graph) {
-                // **MOD 1: Cache Varsa, Akıllı Rota Bul**
-                console.log(`[Akıllı Mod] ${tokenAddress} için en iyi WSTT rotası (cache'den) aranıyor...`);
-                const result = await getBestAmountOut(tokenAddress, WSTT_ADDRESS, amount, graph, ROUTER_ADDRESS, provider);
-                bestAmountOut = result.amount;
-                bestPath = result.path;
-            } else {
-                // **MOD 2: Cache Yoksa, Hızlı ve Basit Rotaları Dene**
-                console.log(`[Hızlı Mod] ${tokenAddress} için basit WSTT rotaları deneniyor...`);
-                const pathsToTry = [
-                    [tokenAddress, WSTT_ADDRESS],
-                    [tokenAddress, USDC_ADDRESS, WSTT_ADDRESS]
-                ];
-
-                for (const path of pathsToTry) {
-                    try {
-                        const amountsOut = await routerContract.getAmountsOut(amount, path);
-                        const currentAmountOut = amountsOut[amountsOut.length - 1];
-                        if (currentAmountOut > bestAmountOut) {
-                            bestAmountOut = currentAmountOut;
-                            bestPath = path;
-                        }
-                    } catch (e) {
-                        // Bu rota geçerli değil, devam et.
-                    }
-                }
-            }
+            console.log(`[Anlık Mod] ${tokenAddress} için en hızlı WSTT rotası aranıyor...`);
+            const { amount: bestAmountOut, path: bestPath } = await getBestAmountOut(
+                tokenAddress,
+                WSTT_ADDRESS,
+                amount,
+                ROUTER_ADDRESS,
+                FACTORY_ADDRESS,
+                provider
+            );
 
             if (bestAmountOut === 0n || bestPath.length === 0) {
                 console.log(`${tokenAddress} için WSTT'ye giden bir rota bulunamadı.`);
@@ -169,11 +138,11 @@ export async function POST(request: Request) {
         };
 
         if (receivedToken0Amount > 0n) {
-            const result = await swapTokenToWSTT(token0Address, receivedToken0Amount, tradingGraph);
+            const result = await swapTokenToWSTT(token0Address, receivedToken0Amount);
             swapResults.push({ token: token0Address, ...result });
         }
         if (receivedToken1Amount > 0n) {
-            const result = await swapTokenToWSTT(token1Address, receivedToken1Amount, tradingGraph);
+            const result = await swapTokenToWSTT(token1Address, receivedToken1Amount);
             swapResults.push({ token: token1Address, ...result });
         }
 
@@ -217,19 +186,6 @@ export async function POST(request: Request) {
             console.log('İşlem logu veritabanına kaydedildi.');
         } catch (dbError) {
             console.error('Veritabanına yazma hatası:', dbError);
-        }
-
-        // --- ADIM 7: Arka Planda Cache Oluşturma (Eğer Gerekliyse) ---
-        if (!tradingGraph) {
-            console.log("İşlem tamamlandı. Şimdi arka planda takas grafiği oluşturuluyor...");
-            // AWAIT KULLANMIYORUZ - Bu işlemin bitmesini beklemeden yanıtı döndürürüz.
-            buildTradingGraph(FACTORY_ADDRESS, provider, (msg: string) => console.log(`[BG-Pathfinder]: ${msg}`))
-                .then(graph => {
-                    setCachedGraph(graph);
-                })
-                .catch(err => {
-                    console.error("Arka planda graf oluşturma hatası:", err);
-                });
         }
 
         return NextResponse.json({

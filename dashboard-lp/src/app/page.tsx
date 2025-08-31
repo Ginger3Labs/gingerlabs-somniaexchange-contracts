@@ -7,7 +7,7 @@ import PairABI from '@/abis/SomniaExchangePair.json';
 import ERC20ABI from '@/abis/IERC20.json';
 import RouterABI from '@/abis/SomniaExchangeRouter.json';
 import { formatToDecimals } from '../../format';
-import { buildTradingGraph, getBestAmountOut } from '@/lib/pathfinder';
+import { getBestAmountOut } from '@/lib/pathfinder';
 
 // Arayüz için veri tipleri
 interface LpPosition {
@@ -31,10 +31,8 @@ const CACHE_KEY_PREFIX = 'lpPositionsCache_';
 export default function Home() {
   const [positions, setPositions] = useState<LpPosition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string>('Başlatılıyor...');
-  const [analysisMessage, setAnalysisMessage] = useState<string>('');
   const [cacheTimestamp, setCacheTimestamp] = useState<number | null>(null);
   const [totalPortfolioValue, setTotalPortfolioValue] = useState<number>(0);
   const [cacheKey, setCacheKey] = useState<string>('');
@@ -54,7 +52,8 @@ export default function Home() {
   const [directWithdrawPercentage, setDirectWithdrawPercentage] = useState<number>(100);
   const [directWithdrawStatus, setDirectWithdrawStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [directWithdrawError, setDirectWithdrawError] = useState<string | null>(null);
-  const [pairsGraph, setPairsGraph] = useState<Map<string, { pairAddress: string, otherToken: string }[]>>(new Map());
+  const [estimatedWsttValues, setEstimatedWsttValues] = useState<Map<string, { token0: string, token1: string, total: string }>>(new Map());
+  const [isEstimating, setIsEstimating] = useState<Set<string>>(new Set());
   const [tokenSymbolMap, setTokenSymbolMap] = useState<Map<string, string>>(() => {
     if (typeof window === 'undefined') {
       return new Map();
@@ -111,140 +110,6 @@ export default function Home() {
     }
   }, [positions, provider, tokenSymbolMap]);
 
-  const buildRoutesAndReprice = useCallback(async (initialPositions: LpPosition[]) => {
-    if (isAnalyzing) return;
-    setIsAnalyzing(true);
-    const factory = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
-    const router = new ethers.Contract(ROUTER_ADDRESS, RouterABI.abi, provider);
-    const PRICE_PRECISION = 30;
-
-    const localTokenSymbolMap = new Map(tokenSymbolMap);
-    initialPositions.forEach(p => {
-      localTokenSymbolMap.set(p.token0.address.toLowerCase(), p.token0.symbol);
-      localTokenSymbolMap.set(p.token1.address.toLowerCase(), p.token1.symbol);
-    });
-    localTokenSymbolMap.set(WSTT_ADDRESS.toLowerCase(), 'WSTT');
-    localTokenSymbolMap.set(USDC_ADDRESS.toLowerCase(), 'USDC');
-
-    const decimalsCache = new Map<string, number>();
-    const getDecimals = async (tokenAddress: string): Promise<number> => {
-      const address = tokenAddress.toLowerCase();
-      if (decimalsCache.has(address)) return decimalsCache.get(address)!;
-      try {
-        const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, provider);
-        const decimals = await tokenContract.decimals();
-        const decimalsNum = Number(decimals);
-        decimalsCache.set(address, decimalsNum);
-        return decimalsNum;
-      } catch (e) {
-        decimalsCache.set(address, 18); return 18;
-      }
-    };
-
-    let newPairsGraph: Map<string, { pairAddress: string, otherToken: string }[]>;
-    const CACHE_KEY_GRAPH = 'tradingGraphCache';
-
-    const cachedGraph = localStorage.getItem(CACHE_KEY_GRAPH);
-
-    if (cachedGraph) {
-      setAnalysisMessage("Takas grafiği önbellekten yükleniyor...");
-      newPairsGraph = new Map(JSON.parse(cachedGraph));
-      setPairsGraph(newPairsGraph);
-    } else {
-      try {
-        newPairsGraph = await buildTradingGraph(FACTORY_ADDRESS, provider, setAnalysisMessage);
-        setPairsGraph(newPairsGraph);
-        localStorage.setItem(CACHE_KEY_GRAPH, JSON.stringify(Array.from(newPairsGraph.entries())));
-      } catch (e) {
-        console.error("Rota grafiği oluşturulurken hata:", e);
-        setAnalysisMessage("Rota analizi başarısız oldu.");
-        setIsAnalyzing(false);
-        return;
-      }
-    }
-
-    const priceCache = new Map<string, { price: string, route: string[] }>();
-    const getTokenPriceInWSTT = async (tokenAddress: string, currentPairsGraph: Map<string, { pairAddress: string, otherToken: string }[]>): Promise<{ price: string, route: string[] }> => {
-      const address = tokenAddress.toLowerCase();
-      if (address === WSTT_ADDRESS.toLowerCase()) return { price: '1.0', route: [WSTT_ADDRESS] };
-      if (priceCache.has(address)) return priceCache.get(address)!;
-
-      try {
-        const tokenInDecimals = await getDecimals(tokenAddress);
-        const wsttDecimals = await getDecimals(WSTT_ADDRESS);
-        const amountIn = ethers.parseUnits('1', tokenInDecimals);
-
-        const { amount: bestAmountOut, path: bestPath } = await getBestAmountOut(
-          tokenAddress,
-          WSTT_ADDRESS,
-          amountIn,
-          currentPairsGraph,
-          ROUTER_ADDRESS,
-          provider
-        );
-
-        if (bestAmountOut === 0n) {
-          const result = { price: '0', route: [] };
-          priceCache.set(address, result);
-          return result;
-        }
-
-        const priceString = ethers.formatUnits(bestAmountOut, wsttDecimals);
-        const result = { price: priceString, route: bestPath };
-        priceCache.set(address, result);
-        return result;
-      } catch (error) {
-        console.error(`[priceService] Failed to get price for ${tokenAddress} in WSTT:`, error);
-        return { price: '0', route: [] };
-      }
-    };
-
-    setAnalysisMessage('Fiyatlar daha doğru verilerle güncelleniyor...');
-    const updatedPositions = await Promise.all(
-      initialPositions.map(async (pos) => {
-        try {
-          const pairContract = new ethers.Contract(pos.pairAddress, PairABI.abi, provider);
-          const [reserves, totalSupply] = await Promise.all([pairContract.getReserves(), pairContract.totalSupply()]);
-          const [token0Decimals, token1Decimals] = await Promise.all([getDecimals(pos.token0.address), getDecimals(pos.token1.address)]);
-          const [price0Result, price1Result] = await Promise.all([
-            getTokenPriceInWSTT(pos.token0.address, newPairsGraph),
-            getTokenPriceInWSTT(pos.token1.address, newPairsGraph)
-          ]);
-
-          const token0Price = ethers.parseUnits(price0Result.price, PRICE_PRECISION);
-          const token1Price = ethers.parseUnits(price1Result.price, PRICE_PRECISION);
-          const bn_balance = ethers.parseEther(pos.lpBalance);
-          const bn_totalSupply = BigInt(totalSupply);
-          const bn_reserves0 = BigInt(reserves[0]);
-          const bn_reserves1 = BigInt(reserves[1]);
-          const bn_ten = 10n;
-
-          const poolTvl0 = (bn_reserves0 * token0Price) / (bn_ten ** BigInt(token0Decimals));
-          const poolTvl1 = (bn_reserves1 * token1Price) / (bn_ten ** BigInt(token1Decimals));
-          const reliableTotalPoolTvl = poolTvl0 < poolTvl1 ? poolTvl0 * 2n : poolTvl1 * 2n;
-          const positionValueUSD = (reliableTotalPoolTvl * bn_balance) / bn_totalSupply;
-          const valueOfEachTokenInUSD = positionValueUSD / 2n;
-          let token0DerivedAmount = (token0Price > 0n) ? (valueOfEachTokenInUSD * (bn_ten ** BigInt(token0Decimals))) / token0Price : 0n;
-          let token1DerivedAmount = (token1Price > 0n) ? (valueOfEachTokenInUSD * (bn_ten ** BigInt(token1Decimals))) / token1Price : 0n;
-
-          return {
-            ...pos,
-            totalValueUSD: ethers.formatUnits(positionValueUSD, PRICE_PRECISION),
-            token0: { ...pos.token0, value: ethers.formatUnits(token0DerivedAmount, token0Decimals), route: price0Result.route },
-            token1: { ...pos.token1, value: ethers.formatUnits(token1DerivedAmount, token1Decimals), route: price1Result.route },
-          };
-        } catch (e) {
-          return pos;
-        }
-      })
-    );
-
-    setPositions(updatedPositions);
-    setTotalPortfolioValue(updatedPositions.reduce((sum, p) => sum + parseFloat(p.totalValueUSD), 0));
-    setAnalysisMessage('Fiyatlar başarıyla güncellendi.');
-    setIsAnalyzing(false);
-  }, [RPC_URL, FACTORY_ADDRESS, ROUTER_ADDRESS, WSTT_ADDRESS, USDC_ADDRESS, isAnalyzing, tokenSymbolMap]);
-
   const fetchLpPositions = async (forceRefresh = false, filterToken: string | null = null) => {
     setIsLoading(true);
     setError(null);
@@ -278,9 +143,8 @@ export default function Home() {
         setCacheTimestamp(parsed.timestamp);
 
         if (parsed.lastScannedIndex + 1 >= parsed.totalPairCount) {
-          setInfoMessage('Önbellekten yüklendi. Analiz başlatılıyor...');
+          setInfoMessage('Önbellekten yüklendi.');
           setIsLoading(false);
-          setTimeout(() => buildRoutesAndReprice(parsed.data), 100);
           return;
         } else {
           initialScanIndex = parsed.lastScannedIndex + 1;
@@ -317,28 +181,33 @@ export default function Home() {
         const address = tokenAddress.toLowerCase();
         if (address === WSTT_ADDRESS.toLowerCase()) return { price: '1.0', route: [WSTT_ADDRESS] };
         if (priceCacheSimple.has(address)) return priceCacheSimple.get(address)!;
+
         try {
           const tokenInDecimals = await getDecimals(tokenAddress);
-          const wsttDecimals = await getDecimals(WSTT_ADDRESS);
           const amountIn = ethers.parseUnits('1', tokenInDecimals);
-          const amountsOut = await router.getAmountsOut(amountIn, [tokenAddress, WSTT_ADDRESS]);
-          const price = ethers.formatUnits(amountsOut[amountsOut.length - 1], wsttDecimals);
-          const result = { price, route: [tokenAddress, WSTT_ADDRESS] };
-          priceCacheSimple.set(address, result);
-          return result;
-        } catch (e) {
-          try {
-            const tokenInDecimals = await getDecimals(tokenAddress);
-            const wsttDecimals = await getDecimals(WSTT_ADDRESS);
-            const amountIn = ethers.parseUnits('1', tokenInDecimals);
-            const amountsOut = await router.getAmountsOut(amountIn, [tokenAddress, USDC_ADDRESS, WSTT_ADDRESS]);
-            const price = ethers.formatUnits(amountsOut[amountsOut.length - 1], wsttDecimals);
-            const result = { price, route: [tokenAddress, USDC_ADDRESS, WSTT_ADDRESS] };
+
+          const { amount: bestAmountOut, path: bestPath } = await getBestAmountOut(
+            tokenAddress,
+            WSTT_ADDRESS,
+            amountIn,
+            ROUTER_ADDRESS,
+            FACTORY_ADDRESS,
+            provider
+          );
+
+          if (bestAmountOut === 0n) {
+            const result = { price: '0', route: [] };
             priceCacheSimple.set(address, result);
             return result;
-          } catch (e2) {
-            return { price: '0', route: [] };
           }
+          const wsttDecimals = await getDecimals(WSTT_ADDRESS);
+          const priceString = ethers.formatUnits(bestAmountOut, wsttDecimals);
+          const result = { price: priceString, route: bestPath };
+          priceCacheSimple.set(address, result);
+          return result;
+        } catch (error) {
+          console.error(`[priceService] Failed to get price for ${tokenAddress} in WSTT:`, error);
+          return { price: '0', route: [] };
         }
       };
 
@@ -426,8 +295,7 @@ export default function Home() {
         setCacheTimestamp(currentProgress.timestamp);
       }
       setTokenSymbolMap(localTokenSymbolMap);
-      setInfoMessage('Tarama tamamlandı. Arka planda detaylı analiz başlatılıyor...');
-      setTimeout(() => buildRoutesAndReprice(foundPositions), 100);
+      setInfoMessage('Tarama tamamlandı.');
     } catch (err: any) {
       console.error('Veri yükleme hatası:', err);
       setError(err.message || 'Veri alınırken bir hata oluştu.');
@@ -440,8 +308,6 @@ export default function Home() {
   const updateSinglePosition = useCallback(async (pairAddress: string) => {
     setRefreshingPosition(pairAddress);
     try {
-      // Bu fonksiyon, tek bir pozisyonun verilerini on-chain'den yeniden çeker ve günceller.
-      // `fetchLpPositions` içindeki mantığın basitleştirilmiş bir versiyonunu kullanır.
       const provider = new ethers.JsonRpcProvider(RPC_URL);
       const pairContract = new ethers.Contract(pairAddress, PairABI.abi, provider);
 
@@ -460,7 +326,6 @@ export default function Home() {
       ]);
 
       if (BigInt(balance) === 0n) {
-        // Eğer bakiye sıfırsa, pozisyonu listeden çıkar
         setPositions(prev => prev.filter(p => p.pairAddress.toLowerCase() !== pairAddress.toLowerCase()));
         return;
       }
@@ -472,9 +337,7 @@ export default function Home() {
         token1Contract.symbol().catch(() => '???')
       ]);
 
-      // Basit fiyatlandırma (hızlı güncelleme için)
       const PRICE_PRECISION = 30;
-      const router = new ethers.Contract(ROUTER_ADDRESS, RouterABI.abi, provider);
       const decimalsCache = new Map<string, number>();
       const getDecimals = async (tokenAddress: string): Promise<number> => {
         if (decimalsCache.has(tokenAddress)) return decimalsCache.get(tokenAddress)!;
@@ -486,43 +349,23 @@ export default function Home() {
       };
 
       const getTokenPriceSimple = async (tokenAddress: string): Promise<{ price: string, route: string[] }> => {
-        const address = tokenAddress.toLowerCase();
-        if (address === WSTT_ADDRESS.toLowerCase()) return { price: '1.0', route: [WSTT_ADDRESS] };
-
-        // En iyi rotayı bulmak için gelişmiş fonksiyonu kullanalım
-        // `pairsGraph` state'inin güncel olduğundan emin olmalıyız.
-        if (pairsGraph.size === 0) {
-          console.warn("Tekli güncelleme sırasında takas grafiği boş. Basit fiyatlandırma kullanılıyor.");
-          try {
-            const tokenInDecimals = await getDecimals(tokenAddress);
-            const wsttDecimals = await getDecimals(WSTT_ADDRESS);
-            const amountIn = ethers.parseUnits('1', tokenInDecimals);
-            const amountsOut = await router.getAmountsOut(amountIn, [tokenAddress, WSTT_ADDRESS]);
-            const price = ethers.formatUnits(amountsOut[amountsOut.length - 1], wsttDecimals);
-            return { price, route: [tokenAddress, WSTT_ADDRESS] };
-          } catch (e) {
-            return { price: '0', route: [] };
-          }
-        }
-
         try {
           const tokenInDecimals = await getDecimals(tokenAddress);
-          const wsttDecimals = await getDecimals(WSTT_ADDRESS);
           const amountIn = ethers.parseUnits('1', tokenInDecimals);
 
           const { amount: bestAmountOut, path: bestPath } = await getBestAmountOut(
             tokenAddress,
             WSTT_ADDRESS,
             amountIn,
-            pairsGraph, // Component state'inden gelen güncel grafiği kullan
             ROUTER_ADDRESS,
+            FACTORY_ADDRESS,
             provider
           );
 
           if (bestAmountOut === 0n) {
             return { price: '0', route: [] };
           }
-
+          const wsttDecimals = await getDecimals(WSTT_ADDRESS);
           const priceString = ethers.formatUnits(bestAmountOut, wsttDecimals);
           return { price: priceString, route: bestPath };
         } catch (error) {
@@ -570,17 +413,15 @@ export default function Home() {
           newPositions[index] = updatedPosition;
           return newPositions;
         }
-        // Eğer pozisyon listede yoksa (bu bir hata durumudur ama yine de handle edelim)
         return [...prev, updatedPosition];
       });
 
     } catch (error) {
       console.error(`Failed to update position ${pairAddress}:`, error);
-      // Hata durumunda kullanıcıya bir bildirim gösterilebilir.
     } finally {
       setRefreshingPosition(null);
     }
-  }, [WALLET_TO_CHECK, RPC_URL, ROUTER_ADDRESS, WSTT_ADDRESS]);
+  }, [WALLET_TO_CHECK, RPC_URL, ROUTER_ADDRESS, FACTORY_ADDRESS, WSTT_ADDRESS]);
 
   useEffect(() => {
     const walletAddress = process.env.NEXT_PUBLIC_WALLET_ADDRESS;
@@ -591,7 +432,6 @@ export default function Home() {
 
   const handleRefresh = useCallback(() => {
     setFilterTokenAddress('');
-    localStorage.removeItem('tradingGraphCache');
     fetchLpPositions(true, null);
   }, []);
 
@@ -662,7 +502,6 @@ export default function Home() {
       }
       setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'success' }));
       await updateSinglePosition(position.pairAddress);
-      // Başarı durumunu 3 saniye sonra temizle
       setTimeout(() => {
         setTxStatus(prev => {
           const newStatus = { ...prev };
@@ -674,8 +513,7 @@ export default function Home() {
       console.error("Withdraw error:", error);
       setTxError(error.message);
       setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'error' }));
-       // Hata durumunu 5 saniye sonra temizle
-       setTimeout(() => {
+      setTimeout(() => {
         setTxStatus(prev => {
           const newStatus = { ...prev };
           delete newStatus[position.pairAddress];
@@ -724,19 +562,115 @@ export default function Home() {
       if (positions.some(p => p.pairAddress.toLowerCase() === directWithdrawPairAddress.toLowerCase())) {
         await updateSinglePosition(directWithdrawPairAddress);
       }
-      // Başarı durumunu 3 saniye sonra temizle
       setTimeout(() => setDirectWithdrawStatus('idle'), 3000);
     } catch (error: any) {
       console.error("Direct withdraw error:", error);
       setDirectWithdrawError(error.message);
       setDirectWithdrawStatus('error');
-      // Hata durumunu 5 saniye sonra temizle
       setTimeout(() => {
         setDirectWithdrawStatus('idle');
         setDirectWithdrawError(null);
       }, 5000);
     }
   }, [directWithdrawPairAddress, directWithdrawPercentage, positions, updateSinglePosition]);
+
+  useEffect(() => {
+    const estimateWithdrawValue = async () => {
+      const positionsToEstimate = positions.filter(p => (withdrawPercentages[p.pairAddress] || 0) > 0);
+
+      if (positionsToEstimate.length === 0) {
+        if (estimatedWsttValues.size > 0) setEstimatedWsttValues(new Map());
+        if (isEstimating.size > 0) setIsEstimating(new Set());
+        return;
+      }
+
+      const currentlyEstimating = new Set(positionsToEstimate.map(p => p.pairAddress));
+      setIsEstimating(currentlyEstimating);
+
+      const decimalsCache = new Map<string, number>();
+      const getDecimals = async (tokenAddress: string): Promise<number> => {
+        const address = tokenAddress.toLowerCase();
+        if (decimalsCache.has(address)) return decimalsCache.get(address)!;
+        try {
+          const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, provider);
+          const decimals = await tokenContract.decimals();
+          const decimalsNum = Number(decimals);
+          decimalsCache.set(address, decimalsNum);
+          return decimalsNum;
+        } catch (e) {
+          decimalsCache.set(address, 18); return 18;
+        }
+      };
+
+      const newEstimates = new Map(estimatedWsttValues);
+
+      await Promise.all(
+        positionsToEstimate.map(async (pos) => {
+          const percentage = withdrawPercentages[pos.pairAddress];
+          if (!percentage) return;
+
+          try {
+            const calculateTokenWstt = async (token: { address: string, value: string }) => {
+              if (parseFloat(token.value) === 0) return '0.0';
+
+              const tokenDecimals = await getDecimals(token.address);
+              const totalAmount = ethers.parseUnits(token.value, tokenDecimals);
+              const amountToWithdraw = (totalAmount * BigInt(percentage)) / 100n;
+
+              if (amountToWithdraw === 0n) return '0.0';
+
+              if (token.address.toLowerCase() === WSTT_ADDRESS.toLowerCase()) {
+                const wsttDecimals = await getDecimals(WSTT_ADDRESS);
+                return ethers.formatUnits(amountToWithdraw, wsttDecimals);
+              }
+
+              const { amount: bestAmountOut } = await getBestAmountOut(
+                token.address,
+                WSTT_ADDRESS,
+                amountToWithdraw,
+                ROUTER_ADDRESS,
+                FACTORY_ADDRESS,
+                provider
+              );
+
+              const wsttDecimals = await getDecimals(WSTT_ADDRESS);
+              return ethers.formatUnits(bestAmountOut, wsttDecimals);
+            };
+
+            const [wstt0, wstt1] = await Promise.all([
+              calculateTokenWstt(pos.token0),
+              calculateTokenWstt(pos.token1)
+            ]);
+
+            const totalWstt = parseFloat(wstt0) + parseFloat(wstt1);
+
+            newEstimates.set(pos.pairAddress, {
+              token0: wstt0,
+              token1: wstt1,
+              total: totalWstt.toFixed(6)
+            });
+
+          } catch (e) {
+            console.error(`[Estimator] ${pos.pairAddress} için WSTT değeri hesaplanamadı:`, e);
+            if (newEstimates.has(pos.pairAddress)) {
+              newEstimates.delete(pos.pairAddress);
+            }
+          }
+        })
+      );
+
+      setEstimatedWsttValues(new Map(newEstimates));
+      setIsEstimating(new Set());
+    };
+
+    const debounceTimeout = setTimeout(() => {
+      estimateWithdrawValue();
+    }, 400);
+
+    return () => clearTimeout(debounceTimeout);
+
+  }, [withdrawPercentages, positions, provider, ROUTER_ADDRESS, FACTORY_ADDRESS, WSTT_ADDRESS]);
+
 
   const renderRoute = (route: string[] | undefined) => {
     if (!route || route.length === 0) return null;
@@ -780,7 +714,7 @@ export default function Home() {
               </div>
               <button
                 onClick={handleRefresh}
-                disabled={isLoading || isAnalyzing}
+                disabled={isLoading}
                 className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold py-2 px-6 rounded-lg disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed transition-all duration-300 shadow-lg flex items-center gap-2"
               >
                 <span>{isLoading ? 'Yükleniyor...' : 'Yenile'}</span>
@@ -806,11 +740,11 @@ export default function Home() {
       )}
 
       <div className="mt-8 w-full max-w-8xl">
-        {(isLoading || isAnalyzing) && (
+        {isLoading && (
           <div className="bg-blue-900/20 border border-blue-500/50 rounded-lg p-4 mb-6">
             <div className="flex items-center gap-3">
               <div className="animate-spin text-blue-400 text-xl">↻</div>
-              <p className="text-blue-400">{isLoading ? infoMessage : analysisMessage}</p>
+              <p className="text-blue-400">{infoMessage}</p>
             </div>
           </div>
         )}
@@ -957,6 +891,7 @@ export default function Home() {
                 <div className="bg-gray-700/30 p-4 rounded-lg mb-4">
                   <p className="text-sm text-gray-400 mb-2">Token Değerleri ve Rotaları</p>
                   <div className="space-y-2">
+                    {/* Token 0 */}
                     <div>
                       <div className="flex justify-between items-center">
                         <span className="font-medium">{pos.token0.symbol}</span>
@@ -964,6 +899,7 @@ export default function Home() {
                       </div>
                       <p className="text-xs text-gray-500 text-right">{renderRoute(pos.token0.route)}</p>
                     </div>
+                    {/* Token 1 */}
                     <div>
                       <div className="flex justify-between items-center">
                         <span className="font-medium">{pos.token1.symbol}</span>
@@ -971,6 +907,34 @@ export default function Home() {
                       </div>
                       <p className="text-xs text-gray-500 text-right">{renderRoute(pos.token1.route)}</p>
                     </div>
+
+                    {/* WSTT Tahmini */}
+                    {(isEstimating.has(pos.pairAddress) || estimatedWsttValues.has(pos.pairAddress)) && (
+                      <div className="pt-2 mt-2 border-t border-gray-600/50">
+                        {isEstimating.has(pos.pairAddress) ? (
+                          <p className="text-sm text-yellow-400 text-center animate-pulse">Hesaplanıyor...</p>
+                        ) : (
+                          estimatedWsttValues.get(pos.pairAddress) && (
+                            <div>
+                              <p className="text-sm text-gray-300 mb-1">
+                                Tahmini WSTT Getirisi (%{withdrawPercentages[pos.pairAddress] || 0})
+                              </p>
+                              <div className="text-right space-y-1">
+                                <p className="text-xs text-gray-400">
+                                  {pos.token0.symbol}: {formatToDecimals(parseFloat(estimatedWsttValues.get(pos.pairAddress)!.token0))} WSTT
+                                </p>
+                                <p className="text-xs text-gray-400">
+                                  {pos.token1.symbol}: {formatToDecimals(parseFloat(estimatedWsttValues.get(pos.pairAddress)!.token1))} WSTT
+                                </p>
+                                <p className="text-lg font-bold text-green-400">
+                                  ≈ {formatToDecimals(parseFloat(estimatedWsttValues.get(pos.pairAddress)!.total))} WSTT
+                                </p>
+                              </div>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -990,7 +954,8 @@ export default function Home() {
                         setWithdrawPercentages(prev => ({ ...prev, [pos.pairAddress]: clampedValue }));
                       }}
                       placeholder="Örn: 2"
-                      className="w-full px-3 py-2 bg-gray-700 rounded text-white placeholder-gray-400"
+                      className="w-full px-3 py-2 bg-gray-700 rounded text-white placeholder-gray-400 disabled:bg-gray-800 disabled:cursor-not-allowed"
+                      disabled={isLoading}
                     />
                     <div className="flex gap-1">
                       {[25, 50, 75, 100].map((p) => (
@@ -1000,7 +965,8 @@ export default function Home() {
                           className={`px-3 py-2 rounded-lg text-xs font-bold transition-colors ${withdrawPercentages[pos.pairAddress] === p
                             ? 'bg-purple-600 text-white'
                             : 'bg-gray-600 hover:bg-gray-500 text-gray-300'
-                            }`}
+                            } disabled:bg-gray-800 disabled:cursor-not-allowed`}
+                          disabled={isLoading}
                         >
                           {p}%
                         </button>
