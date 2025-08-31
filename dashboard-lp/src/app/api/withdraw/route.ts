@@ -1,10 +1,12 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { ethers } from 'ethers';
 import clientPromise from '@/lib/mongodb';
 import RouterABI from '@/abis/SomniaExchangeRouter.json';
 import PairABI from '@/abis/SomniaExchangePair.json';
 import ERC20ABI from '@/abis/IERC20.json';
 import { getBestAmountOut } from '@/lib/pathfinder';
+import { decrypt } from '@/lib/session';
+import { rateLimiter } from '@/lib/rate-limiter';
 
 // Gerekli ortam değişkenlerini kontrol et
 if (!process.env.PRIVATE_KEY) throw new Error('PRIVATE_KEY ortam değişkeni tanımlanmamış.');
@@ -19,7 +21,19 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS!;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+    try {
+        await rateLimiter.checkWithdraw(request);
+    } catch (error) {
+        return NextResponse.json({ success: false, message: 'Too many withdraw attempts. Please try again later.' }, { status: 429 });
+    }
+
+    const cookie = request.cookies.get('session')?.value;
+    const session = await decrypt(cookie);
+    if (!session) {
+        return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+    }
+
     const { pairAddress, token0Address, token1Address, percentage, totalValueUSD, targetTokenAddress } = await request.json();
 
     if (!pairAddress || !token0Address || !token1Address || !percentage || totalValueUSD === undefined || !targetTokenAddress) {
@@ -201,15 +215,9 @@ export async function POST(request: Request) {
 
     } catch (error: unknown) {
         console.error('İşlem sırasında hata oluştu:', error);
-        let message = 'Bilinmeyen bir hata oluştu.';
-        if (error instanceof Error) {
-            // Ethers hatası genellikle 'reason' içerir
-            if (error && typeof error === 'object' && 'reason' in error) {
-                message = (error as { reason: string }).reason;
-            } else {
-                message = error.message;
-            }
-        }
+        // Kullanıcıya genel bir hata mesajı göster.
+        // Gerçek hata sunucu loglarında (yukarıdaki console.error) görülebilir.
+        const message = 'An internal server error occurred during the withdrawal process.';
         return NextResponse.json({ success: false, message }, { status: 500 });
     }
 }

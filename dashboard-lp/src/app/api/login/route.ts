@@ -1,7 +1,14 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { encrypt } from '@/lib/session';
+import { rateLimiter } from '@/lib/rate-limiter';
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+    try {
+        await rateLimiter.checkLogin(request);
+    } catch (error) {
+        return NextResponse.json({ success: false, message: 'Too many login attempts. Please try again later.' }, { status: 429 });
+    }
+
     try {
         const { username, password } = await request.json();
 
