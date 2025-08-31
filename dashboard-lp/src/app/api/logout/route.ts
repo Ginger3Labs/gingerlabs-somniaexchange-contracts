@@ -1,10 +1,16 @@
 import { NextResponse } from 'next/server';
-import { deleteSession } from '@/lib/session';
 
 export async function POST() {
     try {
-        deleteSession(); // This function handles cookie deletion
-        return NextResponse.json({ success: true, message: 'Logged out successfully' });
+        // Create a response and delete the session cookie
+        const response = NextResponse.json({ success: true, message: 'Logged out successfully' });
+        response.cookies.set('session', '', {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            expires: new Date(0), // Expire the cookie immediately
+            path: '/',
+        });
+        return response;
     } catch (error) {
         console.error('Logout API error:', error);
         return NextResponse.json(

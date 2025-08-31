@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createSession } from '@/lib/session';
+import { encrypt } from '@/lib/session';
 
 export async function POST(request: Request) {
     try {
@@ -17,9 +17,20 @@ export async function POST(request: Request) {
         }
 
         if (username === appUsername && password === appPassword) {
-            // Create the session
-            await createSession(username);
-            return NextResponse.json({ success: true });
+            // 1. Create the session payload
+            const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 1 day
+            const session = await encrypt({ username, expiresAt });
+
+            // 2. Create the response and set the cookie
+            const response = NextResponse.json({ success: true });
+            response.cookies.set('session', session, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                expires: expiresAt,
+                sameSite: 'lax',
+                path: '/',
+            });
+            return response;
         } else {
             return NextResponse.json(
                 { success: false, message: 'Invalid username or password' },
