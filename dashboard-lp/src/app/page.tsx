@@ -59,7 +59,7 @@ export default function Home() {
   });
   const [trackedBalances, setTrackedBalances] = useState<TrackedTokenBalance[]>([]);
   const [targetTokenSymbol, setTargetTokenSymbol] = useState<string>('');
-  const [factoryInfo, setFactoryInfo] = useState<{ feeTo: string; feeToSetter: string; protocolFeeStatus: 'Açık' | 'Kapalı' | 'Yükleniyor...'; totalPairs: number }>({ feeTo: '', feeToSetter: '', protocolFeeStatus: 'Yükleniyor...', totalPairs: 0 });
+  const [factoryInfo, setFactoryInfo] = useState<{ feeTo: string; feeToSetter: string; protocolFeeStatus: 'Açık' | 'Kapalı' | 'Yükleniyor...'; totalPairs: number; wrappedTokenAddress: string; }>({ feeTo: '', feeToSetter: '', protocolFeeStatus: 'Yükleniyor...', totalPairs: 0, wrappedTokenAddress: '' });
   const isScanningRef = useRef(false);
   const router = useRouter();
 
@@ -357,26 +357,39 @@ export default function Home() {
   }, [provider, WALLET_TO_CHECK]);
 
   const fetchFactoryInfo = useCallback(async () => {
-    if (!FACTORY_ADDRESS || !provider) return;
+    if (!FACTORY_ADDRESS || !ROUTER_ADDRESS || !provider) return;
     try {
       const factoryContract = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
-      const [feeTo, feeToSetter, allPairsLength] = await Promise.all([
+      const routerContract = new ethers.Contract(ROUTER_ADDRESS, require('@/abis/SomniaExchangeRouter.json').abi, provider);
+
+      const [feeTo, feeToSetter, allPairsLength, wrappedTokenAddress] = await Promise.all([
         factoryContract.feeTo(),
         factoryContract.feeToSetter(),
-        factoryContract.allPairsLength()
+        factoryContract.allPairsLength(),
+        routerContract.WETH()
       ]);
+
       const nullAddress = "0x0000000000000000000000000000000000000000";
-      setFactoryInfo({
+      setFactoryInfo(prev => ({
+        ...prev,
         feeTo,
         feeToSetter,
         protocolFeeStatus: feeTo === nullAddress ? 'Kapalı' : 'Açık',
-        totalPairs: Number(allPairsLength)
-      });
+        totalPairs: Number(allPairsLength),
+        wrappedTokenAddress
+      }));
     } catch (error) {
       console.error("Fabrika bilgileri alınamadı:", error);
-      setFactoryInfo({ feeTo: 'Hata', feeToSetter: 'Hata', protocolFeeStatus: 'Kapalı', totalPairs: 0 });
+      setFactoryInfo(prev => ({
+        ...prev,
+        feeTo: 'Hata',
+        feeToSetter: 'Hata',
+        protocolFeeStatus: 'Kapalı',
+        totalPairs: 0,
+        wrappedTokenAddress: 'Hata'
+      }));
     }
-  }, [provider, FACTORY_ADDRESS]);
+  }, [provider, FACTORY_ADDRESS, ROUTER_ADDRESS]);
 
   useEffect(() => {
     if (WALLET_TO_CHECK) {
@@ -664,7 +677,7 @@ export default function Home() {
                   </svg>
                   <span className="text-gray-400 text-lg">Protokol Bilgileri</span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
                   <div className="bg-gray-800/50 p-3 rounded-lg">
                     <span className="block text-gray-400 mb-1">Toplam Likidite Havuzu</span>
                     <span className="font-mono text-white/90 text-lg">{factoryInfo.totalPairs}</span>
@@ -683,13 +696,9 @@ export default function Home() {
                     <span className="block text-gray-400 mb-1">Yetkili Adres (feeToSetter)</span>
                     <span className="font-mono text-white/90 break-all">{factoryInfo.feeToSetter}</span>
                   </div>
-                  <div className="bg-gray-800/50 p-3 rounded-lg md:col-span-1 lg:col-span-1">
-                    <span className="block text-gray-400 mb-1">Factory Kontratı</span>
-                    <span className="font-mono text-white/90 break-all">{FACTORY_ADDRESS}</span>
-                  </div>
-                  <div className="bg-gray-800/50 p-3 rounded-lg md:col-span-1 lg:col-span-1">
-                    <span className="block text-gray-400 mb-1">Router Kontratı</span>
-                    <span className="font-mono text-white/90 break-all">{ROUTER_ADDRESS}</span>
+                  <div className="bg-gray-800/50 p-3 rounded-lg">
+                    <span className="block text-gray-400 mb-1">Wrapped Token (WSTT)</span>
+                    <span className="font-mono text-white/90 break-all">{factoryInfo.wrappedTokenAddress}</span>
                   </div>
                 </div>
               </div>
