@@ -1058,11 +1058,11 @@ export default function Home() {
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="font-medium">{pos.token0.symbol}</span>
-                    <span>{parseFloat(pos.token0.value).toFixed(4)}</span>
+                    <span>{formatToDecimals(parseFloat(pos.token0.value))}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="font-medium">{pos.token1.symbol}</span>
-                    <span>{parseFloat(pos.token1.value).toFixed(4)}</span>
+                    <span>{formatToDecimals(parseFloat(pos.token1.value))}</span>
                   </div>
                 </div>
               </div>
