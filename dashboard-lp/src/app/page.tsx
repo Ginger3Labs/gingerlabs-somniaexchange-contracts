@@ -6,6 +6,7 @@ import { ethers } from 'ethers';
 import FactoryABI from '@/abis/SomniaExchangeFactory.json';
 import PairABI from '@/abis/SomniaExchangePair.json';
 import ERC20ABI from '@/abis/IERC20.json';
+import RouterABI from '@/abis/SomniaExchangeRouter.json';
 import { formatToDecimals } from '../../format';
 import { getBestAmountOut } from '@/lib/pathfinder';
 
@@ -360,7 +361,7 @@ export default function Home() {
     if (!FACTORY_ADDRESS || !ROUTER_ADDRESS || !provider) return;
     try {
       const factoryContract = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
-      const routerContract = new ethers.Contract(ROUTER_ADDRESS, require('@/abis/SomniaExchangeRouter.json').abi, provider);
+      const routerContract = new ethers.Contract(ROUTER_ADDRESS, RouterABI.abi, provider);
 
       const [feeTo, feeToSetter, allPairsLength, wrappedTokenAddress] = await Promise.all([
         factoryContract.feeTo(),
@@ -487,8 +488,8 @@ export default function Home() {
     const estimateWithdrawValue = async () => {
       const positionsToEstimate = positions.filter(p => (withdrawPercentages[p.pairAddress] || 0) > 0);
       if (positionsToEstimate.length === 0) {
-        if (estimatedTargetTokenValues.size > 0) setEstimatedTargetTokenValues(new Map());
-        if (isEstimating.size > 0) setIsEstimating(new Set());
+        setEstimatedTargetTokenValues(new Map());
+        setIsEstimating(new Set());
         return;
       }
       const currentlyEstimating = new Set(positionsToEstimate.map(p => p.pairAddress));
@@ -507,7 +508,7 @@ export default function Home() {
           decimalsCache.set(address, 18); return 18;
         }
       };
-      const newEstimates = new Map(estimatedTargetTokenValues);
+      const newEstimates = new Map();
       await Promise.all(
         positionsToEstimate.map(async (pos) => {
           const percentage = withdrawPercentages[pos.pairAddress];

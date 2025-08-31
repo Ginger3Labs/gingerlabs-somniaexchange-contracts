@@ -19,7 +19,8 @@ export async function decrypt(session: string | undefined = ''): Promise<JWTPayl
             algorithms: ['HS256'],
         });
         return payload;
-    } catch (e) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (_e) {
         console.log('Failed to verify session');
         return null;
     }

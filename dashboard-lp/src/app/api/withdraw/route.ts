@@ -24,7 +24,8 @@ const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
 export async function POST(request: NextRequest) {
     try {
         await rateLimiter.checkWithdraw(request);
-    } catch (error) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (_error) {
         return NextResponse.json({ success: false, message: 'Too many withdraw attempts. Please try again later.' }, { status: 429 });
     }
 

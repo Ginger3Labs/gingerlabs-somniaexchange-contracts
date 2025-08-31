@@ -5,7 +5,8 @@ import { rateLimiter } from '@/lib/rate-limiter';
 export async function POST(request: NextRequest) {
     try {
         await rateLimiter.checkLogin(request);
-    } catch (error) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (_error) {
         return NextResponse.json({ success: false, message: 'Too many login attempts. Please try again later.' }, { status: 429 });
     }
 

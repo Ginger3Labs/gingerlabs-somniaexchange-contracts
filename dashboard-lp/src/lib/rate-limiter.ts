@@ -1,4 +1,5 @@
-import { RateLimiterMemory } from 'rate-limiter-flexible';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const RateLimiterMemory = require('rate-limiter-flexible/lib/RateLimiterMemory');
 import { NextRequest } from 'next/server';
 
 // Rate limiter seçenekleri
