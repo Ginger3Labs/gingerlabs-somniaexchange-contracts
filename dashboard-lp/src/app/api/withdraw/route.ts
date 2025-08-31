@@ -23,6 +23,10 @@ if (!process.env.MONGODB_DB_NAME) {
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS;
+// Swap işlemleri için sabit adresler
+const WSTT_ADDRESS = "0xF22eF0085f6511f70b01a68F360dCc56261F768a";
+const USDC_ADDRESS = "0xDa4FDE38bE7a2b959BF46E032ECfA21e64019b76";
+
 
 export async function POST(request: Request) {
     const { pairAddress, token0Address, token1Address, percentage, totalValueUSD } = await request.json();
@@ -88,54 +92,114 @@ export async function POST(request: Request) {
             console.log('Yeterli onay zaten mevcut.');
         }
 
-        // 4. Likiditeyi çek (removeLiquidity)
+        // --- ADIM 4: Likiditeyi Çek ---
         console.log('Likidite çekiliyor...');
+        const token0WalletBalanceBefore = BigInt(await (new ethers.Contract(token0Address, ERC20ABI.abi, wallet)).balanceOf(wallet.address));
+        const token1WalletBalanceBefore = BigInt(await (new ethers.Contract(token1Address, ERC20ABI.abi, wallet)).balanceOf(wallet.address));
+
         const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 dakika
         const removeTx = await routerContract.removeLiquidity(
-            token0Address,
-            token1Address,
-            amountToWithdraw, // Hesaplanan miktarı kullan
-            0, // amountAMin, slipaj kontrolü için 0 bırakıldı
-            0, // amountBMin, slipaj kontrolü için 0 bırakıldı
-            wallet.address,
-            deadline
+            token0Address, token1Address, amountToWithdraw, 0, 0, wallet.address, deadline
         );
-
         const receipt = await removeTx.wait();
         console.log('Likidite başarıyla çekildi:', removeTx.hash);
 
-        // İşlem sonrası yeni bakiye ve havuz durumu
+        const token0WalletBalanceAfter = BigInt(await (new ethers.Contract(token0Address, ERC20ABI.abi, wallet)).balanceOf(wallet.address));
+        const token1WalletBalanceAfter = BigInt(await (new ethers.Contract(token1Address, ERC20ABI.abi, wallet)).balanceOf(wallet.address));
+
+        const receivedToken0Amount: bigint = token0WalletBalanceAfter - token0WalletBalanceBefore;
+        const receivedToken1Amount: bigint = token1WalletBalanceAfter - token1WalletBalanceBefore;
+        console.log(`Alınan Token0 Miktarı: ${ethers.formatUnits(receivedToken0Amount, token0Decimals)}`);
+        console.log(`Alınan Token1 Miktarı: ${ethers.formatUnits(receivedToken1Amount, token1Decimals)}`);
+
+        // --- ADIM 5: Alınan Tokenları WSTT'ye Çevir ---
+        const swapResults = [];
+        let totalWSTTReceived = 0n;
+
+        const swapTokenToWSTT = async (tokenAddress: string, amount: bigint) => {
+            if (amount === 0n) return null;
+            if (tokenAddress.toLowerCase() === WSTT_ADDRESS.toLowerCase()) {
+                totalWSTTReceived += amount;
+                return { skipped: true, amount: ethers.formatUnits(amount, 18) };
+            }
+
+            console.log(`${tokenAddress} WSTT'ye çevriliyor...`);
+            const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, wallet);
+
+            // En iyi rotayı bul
+            const directPath = [tokenAddress, WSTT_ADDRESS];
+            const usdcPath = [tokenAddress, USDC_ADDRESS, WSTT_ADDRESS];
+            let bestPath = directPath;
+            let bestAmountOut = 0n;
+
+            try {
+                const directAmountsOut = await routerContract.getAmountsOut(amount, directPath);
+                bestAmountOut = directAmountsOut[directAmountsOut.length - 1];
+            } catch (e) { /* Rota yoksa devam et */ }
+
+            try {
+                const usdcAmountsOut = await routerContract.getAmountsOut(amount, usdcPath);
+                const usdcAmountOut = usdcAmountsOut[usdcAmountsOut.length - 1];
+                if (usdcAmountOut > bestAmountOut) {
+                    bestAmountOut = usdcAmountOut;
+                    bestPath = usdcPath;
+                }
+            } catch (e) { /* Rota yoksa devam et */ }
+
+            if (bestAmountOut === 0n) {
+                console.log(`${tokenAddress} için WSTT'ye giden bir rota bulunamadı.`);
+                return { error: "Rota bulunamadı" };
+            }
+            console.log(`En iyi rota: ${bestPath.join(' -> ')} | Beklenen WSTT: ${ethers.formatUnits(bestAmountOut, 18)}`);
+
+            // Onay ve Swap
+            const approveTx = await tokenContract.approve(ROUTER_ADDRESS, amount);
+            await approveTx.wait();
+            const swapTx = await routerContract.swapExactTokensForTokens(
+                amount, 0, bestPath, wallet.address, Math.floor(Date.now() / 1000) + 60 * 20
+            );
+            const swapReceipt = await swapTx.wait();
+            totalWSTTReceived += bestAmountOut;
+
+            return {
+                txHash: swapTx.hash,
+                path: bestPath.join(' -> '),
+                amountIn: ethers.formatUnits(amount, await tokenContract.decimals()),
+                amountOut: ethers.formatUnits(bestAmountOut, 18),
+            };
+        };
+
+        if (receivedToken0Amount > 0n) {
+            const result = await swapTokenToWSTT(token0Address, receivedToken0Amount);
+            swapResults.push({ token: token0Address, ...result });
+        }
+        if (receivedToken1Amount > 0n) {
+            const result = await swapTokenToWSTT(token1Address, receivedToken1Amount);
+            swapResults.push({ token: token1Address, ...result });
+        }
+
+        // --- ADIM 6: Loglama ve Yanıt ---
         const newLpBalance = await pairContract.balanceOf(wallet.address);
-        const newTotalSupply = await pairContract.totalSupply(); // Bu işlem sonrası güncellenmiş olacak
+        const newTotalSupply = await pairContract.totalSupply();
 
-        // --- İşlem Sonrası Hesaplamalar ---
-        const poolShareAfter = newTotalSupply > 0n ? (Number(newLpBalance) / Number(newTotalSupply)) * 100 : 0;
-        const userToken0BalanceAfter = userToken0BalanceBefore - withdrawnToken0;
-        const userToken1BalanceAfter = userToken1BalanceBefore - withdrawnToken1;
-
-        // USD Değer Hesaplamaları
-        const valueBeforeUSD = totalValueUSD;
-        const withdrawnValueUSD = valueBeforeUSD * (percentage / 100);
-        const valueAfterUSD = valueBeforeUSD - withdrawnValueUSD;
-
-
-        // Veritabanına log kaydet
         try {
+            const poolShareAfter = newTotalSupply > 0n ? (Number(newLpBalance) / Number(newTotalSupply)) * 100 : 0;
+            // totalLpBalance burada işlem öncesi değeri tutar, bu yüzden bu hesaplama doğrudur.
+            const valueAfterUSD = totalValueUSD * (Number(newLpBalance) / Number(totalLpBalance));
+
             const client = await clientPromise;
             const db = client.db(process.env.MONGODB_DB_NAME);
             const collection = db.collection('withdrawals');
-
             const logEntry = {
                 timestamp: new Date(),
                 walletAddress: wallet.address,
                 pairAddress,
-                txHash: removeTx.hash,
+                removeLiquidityTxHash: removeTx.hash,
                 blockNumber: receipt.blockNumber,
                 details: {
                     percentage,
                     totalValueUSD: {
-                        before: valueBeforeUSD.toFixed(4),
-                        withdrawn: withdrawnValueUSD.toFixed(4),
+                        before: totalValueUSD.toFixed(4),
                         after: valueAfterUSD.toFixed(4),
                     },
                     lp: {
@@ -147,30 +211,22 @@ export async function POST(request: Request) {
                         before: `${poolShareBefore.toFixed(6)}%`,
                         after: `${poolShareAfter.toFixed(6)}%`,
                     },
-                    token0: {
-                        address: token0Address,
-                        balanceBefore: ethers.formatUnits(userToken0BalanceBefore, token0Decimals),
-                        withdrawn: ethers.formatUnits(withdrawnToken0, token0Decimals),
-                        balanceAfter: ethers.formatUnits(userToken0BalanceAfter, token0Decimals),
-                    },
-                    token1: {
-                        address: token1Address,
-                        balanceBefore: ethers.formatUnits(userToken1BalanceBefore, token1Decimals),
-                        withdrawn: ethers.formatUnits(withdrawnToken1, token1Decimals),
-                        balanceAfter: ethers.formatUnits(userToken1BalanceAfter, token1Decimals),
-                    }
+                    swaps: swapResults,
+                    finalWSTTReceived: ethers.formatUnits(totalWSTTReceived, 18)
                 }
             };
-
             await collection.insertOne(logEntry);
             console.log('İşlem logu veritabanına kaydedildi.');
-
         } catch (dbError) {
             console.error('Veritabanına yazma hatası:', dbError);
-            // DB hatası ana işlemi etkilememeli, sadece loglanır.
         }
 
-        return NextResponse.json({ success: true, txHash: removeTx.hash });
+        return NextResponse.json({
+            success: true,
+            removeLiquidityTxHash: removeTx.hash,
+            swaps: swapResults,
+            totalWSTTReceived: ethers.formatUnits(totalWSTTReceived, 18)
+        });
 
     } catch (error: any) {
         console.error('İşlem sırasında hata oluştu:', error);
