@@ -55,7 +55,21 @@ export default function Home() {
   const [directWithdrawStatus, setDirectWithdrawStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [directWithdrawError, setDirectWithdrawError] = useState<string | null>(null);
   const [pairsGraph, setPairsGraph] = useState<Map<string, { pairAddress: string, otherToken: string }[]>>(new Map());
-  const [tokenSymbolMap, setTokenSymbolMap] = useState<Map<string, string>>(new Map());
+  const [tokenSymbolMap, setTokenSymbolMap] = useState<Map<string, string>>(() => {
+    if (typeof window === 'undefined') {
+      return new Map();
+    }
+    const cached = localStorage.getItem('tokenSymbolMapCache');
+    return cached ? new Map(JSON.parse(cached)) : new Map();
+  });
+  const [refreshingPosition, setRefreshingPosition] = useState<string | null>(null);
+
+  useEffect(() => {
+    // tokenSymbolMap her değiştiğinde localStorage'a kaydet
+    if (tokenSymbolMap.size > 0) {
+      localStorage.setItem('tokenSymbolMapCache', JSON.stringify(Array.from(tokenSymbolMap.entries())));
+    }
+  }, [tokenSymbolMap]);
 
   const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL!;
   const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS!;
@@ -70,7 +84,7 @@ export default function Home() {
     const fetchMissingSymbols = async () => {
       const allRoutes = positions.flatMap(p => [...(p.token0.route || []), ...(p.token1.route || [])]);
       const uniqueAddresses = [...new Set(allRoutes)].filter(addr => addr);
-      
+
       const missingSymbols = uniqueAddresses.filter(addr => !tokenSymbolMap.has(addr.toLowerCase()));
 
       if (missingSymbols.length > 0) {
@@ -424,12 +438,116 @@ export default function Home() {
   };
 
   const updateSinglePosition = useCallback(async (pairAddress: string) => {
+    setRefreshingPosition(pairAddress);
     try {
-      await fetchLpPositions(true);
+      // Bu fonksiyon, tek bir pozisyonun verilerini on-chain'den yeniden çeker ve günceller.
+      // `fetchLpPositions` içindeki mantığın basitleştirilmiş bir versiyonunu kullanır.
+      const provider = new ethers.JsonRpcProvider(RPC_URL);
+      const pairContract = new ethers.Contract(pairAddress, PairABI.abi, provider);
+
+      const [
+        token0Address,
+        token1Address,
+        reserves,
+        totalSupply,
+        balance
+      ] = await Promise.all([
+        pairContract.token0(),
+        pairContract.token1(),
+        pairContract.getReserves(),
+        pairContract.totalSupply(),
+        pairContract.balanceOf(WALLET_TO_CHECK)
+      ]);
+
+      if (BigInt(balance) === 0n) {
+        // Eğer bakiye sıfırsa, pozisyonu listeden çıkar
+        setPositions(prev => prev.filter(p => p.pairAddress.toLowerCase() !== pairAddress.toLowerCase()));
+        return;
+      }
+
+      const token0Contract = new ethers.Contract(token0Address, ERC20ABI.abi, provider);
+      const token1Contract = new ethers.Contract(token1Address, ERC20ABI.abi, provider);
+      const [token0Symbol, token1Symbol] = await Promise.all([
+        token0Contract.symbol().catch(() => '???'),
+        token1Contract.symbol().catch(() => '???')
+      ]);
+
+      // Basit fiyatlandırma (hızlı güncelleme için)
+      const PRICE_PRECISION = 30;
+      const router = new ethers.Contract(ROUTER_ADDRESS, RouterABI.abi, provider);
+      const decimalsCache = new Map<string, number>();
+      const getDecimals = async (tokenAddress: string): Promise<number> => {
+        if (decimalsCache.has(tokenAddress)) return decimalsCache.get(tokenAddress)!;
+        const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, provider);
+        const decimals = await tokenContract.decimals();
+        const num = Number(decimals);
+        decimalsCache.set(tokenAddress, num);
+        return num;
+      };
+
+      const getTokenPriceSimple = async (tokenAddress: string): Promise<string> => {
+        if (tokenAddress.toLowerCase() === WSTT_ADDRESS.toLowerCase()) return '1.0';
+        try {
+          const tokenInDecimals = await getDecimals(tokenAddress);
+          const wsttDecimals = await getDecimals(WSTT_ADDRESS);
+          const amountIn = ethers.parseUnits('1', tokenInDecimals);
+          const amountsOut = await router.getAmountsOut(amountIn, [tokenAddress, WSTT_ADDRESS]);
+          return ethers.formatUnits(amountsOut[amountsOut.length - 1], wsttDecimals);
+        } catch (e) {
+          return '0';
+        }
+      };
+
+      const [token0PriceStr, token1PriceStr] = await Promise.all([
+        getTokenPriceSimple(token0Address),
+        getTokenPriceSimple(token1Address)
+      ]);
+
+      const token0Price = ethers.parseUnits(token0PriceStr, PRICE_PRECISION);
+      const token1Price = ethers.parseUnits(token1PriceStr, PRICE_PRECISION);
+      const [token0Decimals, token1Decimals] = await Promise.all([getDecimals(token0Address), getDecimals(token1Address)]);
+
+      const bn_balance = BigInt(balance);
+      const bn_totalSupply = BigInt(totalSupply);
+      const bn_reserves0 = BigInt(reserves[0]);
+      const bn_reserves1 = BigInt(reserves[1]);
+      const bn_ten = 10n;
+
+      const poolTvl0 = (bn_reserves0 * token0Price) / (bn_ten ** BigInt(token0Decimals));
+      const poolTvl1 = (bn_reserves1 * token1Price) / (bn_ten ** BigInt(token1Decimals));
+      const reliableTotalPoolTvl = poolTvl0 < poolTvl1 ? poolTvl0 * 2n : poolTvl1 * 2n;
+      const positionValueUSD = (reliableTotalPoolTvl * bn_balance) / bn_totalSupply;
+      const valueOfEachTokenInUSD = positionValueUSD / 2n;
+      let token0DerivedAmount = (token0Price > 0n) ? (valueOfEachTokenInUSD * (bn_ten ** BigInt(token0Decimals))) / token0Price : 0n;
+      let token1DerivedAmount = (token1Price > 0n) ? (valueOfEachTokenInUSD * (bn_ten ** BigInt(token1Decimals))) / token1Price : 0n;
+
+      const updatedPosition: LpPosition = {
+        pairAddress,
+        token0: { address: token0Address, symbol: token0Symbol, value: ethers.formatUnits(token0DerivedAmount, token0Decimals) },
+        token1: { address: token1Address, symbol: token1Symbol, value: ethers.formatUnits(token1DerivedAmount, token1Decimals) },
+        lpBalance: ethers.formatEther(balance),
+        poolShare: (Number((bn_balance * 10000n) / bn_totalSupply) / 100).toFixed(4),
+        totalValueUSD: ethers.formatUnits(positionValueUSD, PRICE_PRECISION),
+      };
+
+      setPositions(prev => {
+        const index = prev.findIndex(p => p.pairAddress.toLowerCase() === pairAddress.toLowerCase());
+        if (index !== -1) {
+          const newPositions = [...prev];
+          newPositions[index] = updatedPosition;
+          return newPositions;
+        }
+        // Eğer pozisyon listede yoksa (bu bir hata durumudur ama yine de handle edelim)
+        return [...prev, updatedPosition];
+      });
+
     } catch (error) {
       console.error(`Failed to update position ${pairAddress}:`, error);
+      // Hata durumunda kullanıcıya bir bildirim gösterilebilir.
+    } finally {
+      setRefreshingPosition(null);
     }
-  }, []);
+  }, [WALLET_TO_CHECK, RPC_URL, ROUTER_ADDRESS, WSTT_ADDRESS]);
 
   useEffect(() => {
     const walletAddress = process.env.NEXT_PUBLIC_WALLET_ADDRESS;
@@ -745,9 +863,23 @@ export default function Home() {
 
               <div className="flex-grow">
                 <div className="flex justify-between items-start mt-2 mb-4">
-                  <div className="flex-1">
-                    <h3 className="text-xl font-bold text-white mb-1">{pos.token0.symbol}/{pos.token1.symbol}</h3>
-                    <p className="text-xs text-gray-400 font-mono break-all">{pos.pairAddress}</p>
+                  <button
+                    onClick={() => updateSinglePosition(pos.pairAddress)}
+                    disabled={!!refreshingPosition}
+                    className="absolute top-0 left-2 text-2xl text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <span className={`text-3xl ${refreshingPosition === pos.pairAddress ? 'animate-spin' : ''}`}>
+                      ↻
+                    </span>
+                  </button>
+                  <div className="flex-1 flex items-center gap-2">
+                    <div>
+                      <h3 className="text-xl font-bold text-white mb-1">
+                        {pos.token0.symbol}/{pos.token1.symbol}
+                      </h3>
+                      <p className="text-xs text-gray-400 font-mono break-all">{pos.pairAddress}</p>
+                    </div>
+
                   </div>
                   <div className="text-right">
                     <span className="text-2xl font-bold text-green-400">${formatToDecimals(Number(pos.totalValueUSD))}</span>
@@ -823,7 +955,7 @@ export default function Home() {
                 <div>
                   <button
                     onClick={() => handleWithdraw(pos, withdrawPercentages[pos.pairAddress] || 100)}
-                    disabled={txStatus[pos.pairAddress] === 'pending' || isLoading || !withdrawPercentages[pos.pairAddress]}
+                    disabled={txStatus[pos.pairAddress] === 'pending' || !withdrawPercentages[pos.pairAddress]}
                     className="w-full bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-bold py-3 px-4 rounded-lg disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed transition-all duration-300 shadow-lg"
                   >
                     {txStatus[pos.pairAddress] === 'pending'
