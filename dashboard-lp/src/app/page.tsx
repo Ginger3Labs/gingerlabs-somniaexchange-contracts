@@ -516,7 +516,7 @@ export default function Home() {
     };
     const debounceTimeout = setTimeout(() => estimateWithdrawValue(), 400);
     return () => clearTimeout(debounceTimeout);
-  }, [withdrawPercentages, positions, provider, ROUTER_ADDRESS, FACTORY_ADDRESS, TARGET_TOKEN_ADDRESS, estimatedTargetTokenValues, isEstimating.size]);
+  }, [withdrawPercentages, positions, provider, ROUTER_ADDRESS, FACTORY_ADDRESS, TARGET_TOKEN_ADDRESS]);
 
   const renderRoute = (route: string[] | undefined) => {
     if (!route || route.length === 0) return null;
