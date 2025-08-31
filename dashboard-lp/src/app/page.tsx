@@ -54,7 +54,7 @@ export default function Home() {
 
   // --- KONFIGURASYON (.env dosyasından okunur) ---
   const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL!;
-  const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS!;
+  const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS!;
   const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
   const WSTT_ADDRESS = process.env.NEXT_PUBLIC_WSTT_ADDRESS!;
   const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
