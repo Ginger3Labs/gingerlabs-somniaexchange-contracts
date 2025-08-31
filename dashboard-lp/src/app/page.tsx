@@ -787,7 +787,7 @@ export default function Home() {
                 <div className="space-y-3">
                   <div className="flex justify-between items-start">
                     <div>
-                      <h3 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 text-transparent bg-clip-text">
+                      <h3 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 text-transparent bg-clip-text max-w-2xs truncate">
                         {pos.token0.symbol}/{pos.token1.symbol}
                       </h3>
                       <p className="text-xs text-gray-400 font-mono mt-1">
