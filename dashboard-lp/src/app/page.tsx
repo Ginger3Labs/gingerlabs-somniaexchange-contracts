@@ -80,21 +80,6 @@ export default function Home() {
     localTokenSymbolMap.set(WSTT_ADDRESS.toLowerCase(), 'WSTT');
     localTokenSymbolMap.set(USDC_ADDRESS.toLowerCase(), 'USDC');
 
-    const symbolCache = new Map<string, string>(localTokenSymbolMap);
-    const getSymbol = async (tokenAddress: string): Promise<string> => {
-      const address = tokenAddress.toLowerCase();
-      if (symbolCache.has(address)) return symbolCache.get(address)!;
-      try {
-        const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, provider);
-        const symbol = await tokenContract.symbol();
-        symbolCache.set(address, symbol);
-        return symbol;
-      } catch (e) {
-        symbolCache.set(address, address.slice(0, 6));
-        return address.slice(0, 6);
-      }
-    };
-
     const decimalsCache = new Map<string, number>();
     const getDecimals = async (tokenAddress: string): Promise<number> => {
       const address = tokenAddress.toLowerCase();
@@ -208,12 +193,6 @@ export default function Home() {
       })
     );
 
-    const allRoutes = updatedPositions.flatMap(p => [...(p.token0.route || []), ...(p.token1.route || [])]);
-    const uniqueRouteAddresses = [...new Set(allRoutes)];
-
-    await Promise.all(uniqueRouteAddresses.map(addr => getSymbol(addr)));
-
-    setTokenSymbolMap(new Map(symbolCache));
     setPositions(updatedPositions);
     setTotalPortfolioValue(updatedPositions.reduce((sum, p) => sum + parseFloat(p.totalValueUSD), 0));
     setAnalysisMessage('Fiyatlar başarıyla güncellendi.');
