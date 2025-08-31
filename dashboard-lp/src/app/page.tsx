@@ -216,7 +216,7 @@ export default function Home() {
       const pairsToScan = Number(pairCount);
       if (initialScanIndex === 0) setInfoMessage(`Toplam ${pairsToScan} çift taranıyor...`);
 
-      const BATCH_SIZE = 2;
+      const BATCH_SIZE = 20;
       const BATCH_TIMEOUT = 30000; // 30 saniye
       const localTokenSymbolMap = new Map();
 
