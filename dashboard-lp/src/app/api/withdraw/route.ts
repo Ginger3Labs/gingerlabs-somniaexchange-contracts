@@ -20,6 +20,7 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS!;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
 const WSTT_ADDRESS = process.env.NEXT_PUBLIC_WSTT_ADDRESS!;
+const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
 
 
 export async function POST(request: Request) {
@@ -36,7 +37,6 @@ export async function POST(request: Request) {
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
     const routerContract = new ethers.Contract(ROUTER_ADDRESS, (RouterABI as any).abi, wallet);
-    // PairABI'yi kullanarak daha fazla fonksiyona erişim sağlıyoruz (getReserves, totalSupply)
     const pairContract = new ethers.Contract(pairAddress, PairABI.abi, wallet);
     const token0Contract = new ethers.Contract(token0Address, ERC20ABI.abi, provider);
     const token1Contract = new ethers.Contract(token1Address, ERC20ABI.abi, provider);
@@ -54,31 +54,21 @@ export async function POST(request: Request) {
             token0Contract.decimals(),
             token1Contract.decimals()
         ]);
-        // getReserves'den dönen değer bir array'dir. Doğru şekilde alalım.
         const _reserve0: bigint = reserves[0];
         const _reserve1: bigint = reserves[1];
 
-        // --- İşlem Öncesi Hesaplamalar (Tümü BigInt ile) ---
         const userToken0BalanceBefore: bigint = (_reserve0 * totalLpBalance) / totalSupply;
         const userToken1BalanceBefore: bigint = (_reserve1 * totalLpBalance) / totalSupply;
 
-        // Yüzdeye göre çekilecek miktarı hesapla
         const amountToWithdraw = (totalLpBalance * BigInt(Math.floor(percentage))) / 100n;
         console.log(`Toplam Bakiye: ${ethers.formatUnits(totalLpBalance, 18)}, Çekilecek Miktar (%${percentage}): ${ethers.formatUnits(amountToWithdraw, 18)}`);
 
-        // Çekilecek token miktarlarını hesapla (Tümü BigInt ile)
-        // Hassasiyet kaybını önlemek için önce çarpma
-        const withdrawnToken0: bigint = (userToken0BalanceBefore * amountToWithdraw) / totalLpBalance;
-        const withdrawnToken1: bigint = (userToken1BalanceBefore * amountToWithdraw) / totalLpBalance;
-
-        // Yüzde hesaplamalarını Number'a çevirerek en son yap
         const poolShareBefore = (Number(totalLpBalance) / Number(totalSupply)) * 100;
 
         // Router'a harcama onayı (approve) ver
         const allowance = await pairContract.allowance(wallet.address, ROUTER_ADDRESS);
         if (allowance < amountToWithdraw) {
             console.log('Onay veriliyor...');
-            // Sadece gereken miktar için onay vermek yerine, gelecekteki işlemler için MaxUint256 kullanmak daha verimli olabilir.
             const approveTx = await pairContract.approve(ROUTER_ADDRESS, ethers.MaxUint256);
             await approveTx.wait();
             console.log('Onay başarılı:', approveTx.hash);
@@ -110,54 +100,64 @@ export async function POST(request: Request) {
         const swapResults = [];
         let totalWSTTReceived = 0n;
 
-        const getGraph = async (): Promise<TradingGraph> => {
-            let graph = getCachedGraph();
-            if (graph) {
-                return graph;
-            }
-            console.log("Yeni takas grafiği oluşturuluyor...");
-            graph = await buildTradingGraph(FACTORY_ADDRESS, provider, (msg: string) => console.log(`[Pathfinder]: ${msg}`));
-            setCachedGraph(graph);
-            return graph;
-        };
+        // Cache'i en başta bir kere oku
+        const tradingGraph = await getCachedGraph();
 
-        const swapTokenToWSTT = async (tokenAddress: string, amount: bigint, graph: TradingGraph) => {
+        const swapTokenToWSTT = async (tokenAddress: string, amount: bigint, graph: TradingGraph | null) => {
             if (amount === 0n) return null;
             if (tokenAddress.toLowerCase() === WSTT_ADDRESS.toLowerCase()) {
                 totalWSTTReceived += amount;
                 return { skipped: true, amount: ethers.formatUnits(amount, 18) };
             }
 
-            console.log(`${tokenAddress} için en iyi WSTT rotası aranıyor...`);
             const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, wallet);
+            let bestAmountOut = 0n;
+            let bestPath: string[] = [];
 
-            const { amount: bestAmountOut, path: bestPath } = await getBestAmountOut(
-                tokenAddress, WSTT_ADDRESS, amount, graph, ROUTER_ADDRESS, provider
-            );
+            if (graph) {
+                // **MOD 1: Cache Varsa, Akıllı Rota Bul**
+                console.log(`[Akıllı Mod] ${tokenAddress} için en iyi WSTT rotası (cache'den) aranıyor...`);
+                const result = await getBestAmountOut(tokenAddress, WSTT_ADDRESS, amount, graph, ROUTER_ADDRESS, provider);
+                bestAmountOut = result.amount;
+                bestPath = result.path;
+            } else {
+                // **MOD 2: Cache Yoksa, Hızlı ve Basit Rotaları Dene**
+                console.log(`[Hızlı Mod] ${tokenAddress} için basit WSTT rotaları deneniyor...`);
+                const pathsToTry = [
+                    [tokenAddress, WSTT_ADDRESS],
+                    [tokenAddress, USDC_ADDRESS, WSTT_ADDRESS]
+                ];
+
+                for (const path of pathsToTry) {
+                    try {
+                        const amountsOut = await routerContract.getAmountsOut(amount, path);
+                        const currentAmountOut = amountsOut[amountsOut.length - 1];
+                        if (currentAmountOut > bestAmountOut) {
+                            bestAmountOut = currentAmountOut;
+                            bestPath = path;
+                        }
+                    } catch (e) {
+                        // Bu rota geçerli değil, devam et.
+                    }
+                }
+            }
 
             if (bestAmountOut === 0n || bestPath.length === 0) {
                 console.log(`${tokenAddress} için WSTT'ye giden bir rota bulunamadı.`);
-                // Hata fırlatmak yerine, bu token'ı atlayıp log'a not düşebiliriz.
-                // Bu, bir token takas edilemese bile diğerinin edilmesine olanak tanır.
-                return { error: "Akıllı rota bulunamadı", amountIn: ethers.formatUnits(amount, await tokenContract.decimals()) };
+                return { error: "Rota bulunamadı", amountIn: ethers.formatUnits(amount, await tokenContract.decimals()) };
             }
-            console.log(`En iyi rota bulundu: ${bestPath.join(' -> ')} | Beklenen WSTT: ${ethers.formatUnits(bestAmountOut, 18)}`);
+
+            console.log(`Kullanılacak rota: ${bestPath.join(' -> ')} | Beklenen WSTT: ${ethers.formatUnits(bestAmountOut, 18)}`);
 
             // Onay ve Swap
             const approveTx = await tokenContract.approve(ROUTER_ADDRESS, amount);
             await approveTx.wait();
 
             const swapTx = await routerContract.swapExactTokensForTokens(
-                amount,
-                0, // Slippage'ı şimdilik 0 kabul ediyoruz, daha sonra ayarlanabilir.
-                bestPath,
-                wallet.address,
-                Math.floor(Date.now() / 1000) + 60 * 20
+                amount, 0, bestPath, wallet.address, Math.floor(Date.now() / 1000) + 60 * 20
             );
             await swapTx.wait();
 
-            // Gerçekte ne kadar WSTT alındığını kontrol etmek daha doğru olur,
-            // ama şimdilik getAmountsOut'a güveniyoruz.
             totalWSTTReceived += bestAmountOut;
 
             return {
@@ -167,8 +167,6 @@ export async function POST(request: Request) {
                 amountOut: ethers.formatUnits(bestAmountOut, 18),
             };
         };
-
-        const tradingGraph = await getGraph();
 
         if (receivedToken0Amount > 0n) {
             const result = await swapTokenToWSTT(token0Address, receivedToken0Amount, tradingGraph);
@@ -185,8 +183,7 @@ export async function POST(request: Request) {
 
         try {
             const poolShareAfter = newTotalSupply > 0n ? (Number(newLpBalance) / Number(newTotalSupply)) * 100 : 0;
-            // totalLpBalance burada işlem öncesi değeri tutar, bu yüzden bu hesaplama doğrudur.
-            const valueAfterUSD = totalValueUSD * (Number(newLpBalance) / Number(totalLpBalance));
+            const valueAfterUSD = totalValueUSD > 0 && totalLpBalance > 0n ? totalValueUSD * (Number(newLpBalance) / Number(totalLpBalance)) : 0;
 
             const client = await clientPromise;
             const db = client.db(process.env.MONGODB_DB_NAME);
@@ -220,6 +217,19 @@ export async function POST(request: Request) {
             console.log('İşlem logu veritabanına kaydedildi.');
         } catch (dbError) {
             console.error('Veritabanına yazma hatası:', dbError);
+        }
+
+        // --- ADIM 7: Arka Planda Cache Oluşturma (Eğer Gerekliyse) ---
+        if (!tradingGraph) {
+            console.log("İşlem tamamlandı. Şimdi arka planda takas grafiği oluşturuluyor...");
+            // AWAIT KULLANMIYORUZ - Bu işlemin bitmesini beklemeden yanıtı döndürürüz.
+            buildTradingGraph(FACTORY_ADDRESS, provider, (msg: string) => console.log(`[BG-Pathfinder]: ${msg}`))
+                .then(graph => {
+                    setCachedGraph(graph);
+                })
+                .catch(err => {
+                    console.error("Arka planda graf oluşturma hatası:", err);
+                });
         }
 
         return NextResponse.json({

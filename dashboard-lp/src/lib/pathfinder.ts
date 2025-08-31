@@ -115,7 +115,7 @@ export async function getBestAmountOut(
                 if (path.map(p => p.toLowerCase()).includes(nextToken.toLowerCase())) continue;
 
                 if (isPriorityOnly && !priorityTokenSet.has(nextToken.toLowerCase())) continue;
-                
+
                 const newPath = [...path, nextToken];
                 queue.push(newPath);
             }

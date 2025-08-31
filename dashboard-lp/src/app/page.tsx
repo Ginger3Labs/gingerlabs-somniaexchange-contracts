@@ -662,10 +662,27 @@ export default function Home() {
       }
       setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'success' }));
       await updateSinglePosition(position.pairAddress);
+      // Başarı durumunu 3 saniye sonra temizle
+      setTimeout(() => {
+        setTxStatus(prev => {
+          const newStatus = { ...prev };
+          delete newStatus[position.pairAddress];
+          return newStatus;
+        });
+      }, 3000);
     } catch (error: any) {
       console.error("Withdraw error:", error);
       setTxError(error.message);
       setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'error' }));
+       // Hata durumunu 5 saniye sonra temizle
+       setTimeout(() => {
+        setTxStatus(prev => {
+          const newStatus = { ...prev };
+          delete newStatus[position.pairAddress];
+          return newStatus;
+        });
+        setTxError(null);
+      }, 5000);
     }
   }, [updateSinglePosition]);
 
@@ -707,10 +724,17 @@ export default function Home() {
       if (positions.some(p => p.pairAddress.toLowerCase() === directWithdrawPairAddress.toLowerCase())) {
         await updateSinglePosition(directWithdrawPairAddress);
       }
+      // Başarı durumunu 3 saniye sonra temizle
+      setTimeout(() => setDirectWithdrawStatus('idle'), 3000);
     } catch (error: any) {
       console.error("Direct withdraw error:", error);
       setDirectWithdrawError(error.message);
       setDirectWithdrawStatus('error');
+      // Hata durumunu 5 saniye sonra temizle
+      setTimeout(() => {
+        setDirectWithdrawStatus('idle');
+        setDirectWithdrawError(null);
+      }, 5000);
     }
   }, [directWithdrawPairAddress, directWithdrawPercentage, positions, updateSinglePosition]);
 
