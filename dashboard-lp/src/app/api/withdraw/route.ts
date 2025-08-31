@@ -20,12 +20,12 @@ if (!process.env.MONGODB_DB_NAME) {
 }
 
 
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL;
-const PRIVATE_KEY = process.env.PRIVATE_KEY;
-const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS;
-// Swap işlemleri için sabit adresler
-const WSTT_ADDRESS = "0xF22eF0085f6511f70b01a68F360dCc56261F768a";
-const USDC_ADDRESS = "0xDa4FDE38bE7a2b959BF46E032ECfA21e64019b76";
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL!;
+const PRIVATE_KEY = process.env.PRIVATE_KEY!;
+const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS!;
+// Swap işlemleri için sabit adresler (.env'den okunur)
+const WSTT_ADDRESS = process.env.NEXT_PUBLIC_WSTT_ADDRESS!;
+const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
 
 
 export async function POST(request: Request) {

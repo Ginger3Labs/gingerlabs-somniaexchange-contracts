@@ -52,13 +52,12 @@ export default function Home() {
   const [directWithdrawStatus, setDirectWithdrawStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [directWithdrawError, setDirectWithdrawError] = useState<string | null>(null);
 
-  // --- KONFIGURASYON ---
-  const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://enterprise.onerpc.com/somnia_testnet?apikey=Ku3gV1hlxVE3wPUH5aeLC126NpZfO2Sg";
-  const WALLET_TO_CHECK = "0xD8976d7D8F18e536827113dc3707c55f15FC8915"; // Bu, özel anahtarın adresiyle değiştirilecek
-  const FACTORY_ADDRESS = "0x31015A978c5815EdE29D0F969a17e116BC1866B1";
-  const ROUTER_ADDRESS = "0xb98c15a0dC1e271132e341250703c7e94c059e8D";
-  const WSTT_ADDRESS = "0xF22eF0085f6511f70b01a68F360dCc56261F768a";
-  const USDC_ADDRESS = "0xDa4FDE38bE7a2b959BF46E032ECfA21e64019b76";
+  // --- KONFIGURASYON (.env dosyasından okunur) ---
+  const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL!;
+  const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS!;
+  const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
+  const WSTT_ADDRESS = process.env.NEXT_PUBLIC_WSTT_ADDRESS!;
+  const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
   // --- BİTİŞ ---
 
   const fetchLpPositions = async (forceRefresh = false, filterToken: string | null = null) => {
@@ -724,6 +723,8 @@ export default function Home() {
         pairContract.token1()
       ]);
 
+      // USD değerini on-chain'den çekmek yerine, bu basit işlem için 0 gönderiyoruz.
+      // Sunucu tarafı bu değeri loglama için kullanır, ancak bu özel durumda kritik değildir.
       const response = await fetch('/api/withdraw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -732,6 +733,7 @@ export default function Home() {
           token0Address: token0Address,
           token1Address: token1Address,
           percentage: directWithdrawPercentage,
+          totalValueUSD: 0
         }),
       });
 
