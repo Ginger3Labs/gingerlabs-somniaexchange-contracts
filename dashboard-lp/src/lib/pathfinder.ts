@@ -46,7 +46,7 @@ export async function getBestAmountOut(
                 return { amount: finalAmount, path };
             }
         }
-    } catch (e) {
+    } catch {
         // Bu yol geçerli değil, devam et.
     }
 
@@ -72,7 +72,7 @@ export async function getBestAmountOut(
                     return { amount: finalAmount, path };
                 }
             }
-        } catch (e) {
+        } catch {
             // Bu yol geçerli değil, sonraki öncelikli token ile devam et.
         }
     }

@@ -18,7 +18,6 @@ const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL!;
 const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS!;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
-const TARGET_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TARGET_TOKEN_ADDRESS!;
 
 export async function POST(request: Request) {
     const { pairAddress, token0Address, token1Address, percentage, totalValueUSD, targetTokenAddress } = await request.json();
@@ -33,7 +32,7 @@ export async function POST(request: Request) {
 
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
-    const routerContract = new ethers.Contract(ROUTER_ADDRESS, (RouterABI as any).abi, wallet);
+    const routerContract = new ethers.Contract(ROUTER_ADDRESS, RouterABI.abi, wallet);
     const pairContract = new ethers.Contract(pairAddress, PairABI.abi, wallet);
     const token0Contract = new ethers.Contract(token0Address, ERC20ABI.abi, provider);
     const token1Contract = new ethers.Contract(token1Address, ERC20ABI.abi, provider);
@@ -45,8 +44,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, message: 'Çekilecek LP token bulunamadı.' }, { status: 400 });
         }
 
-        const [reserves, totalSupply, token0Decimals, token1Decimals] = await Promise.all([
-            pairContract.getReserves(),
+        const [totalSupply, token0Decimals, token1Decimals] = await Promise.all([
             pairContract.totalSupply(),
             token0Contract.decimals(),
             token1Contract.decimals()
@@ -201,8 +199,17 @@ export async function POST(request: Request) {
             totalTargetTokenReceived: ethers.formatUnits(totalTargetTokenReceived, targetTokenDecimals)
         });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('İşlem sırasında hata oluştu:', error);
-        return NextResponse.json({ success: false, message: error.reason || error.message || 'Bilinmeyen bir hata oluştu.' }, { status: 500 });
+        let message = 'Bilinmeyen bir hata oluştu.';
+        if (error instanceof Error) {
+            // Ethers hatası genellikle 'reason' içerir
+            if (error && typeof error === 'object' && 'reason' in error) {
+                message = (error as { reason: string }).reason;
+            } else {
+                message = error.message;
+            }
+        }
+        return NextResponse.json({ success: false, message }, { status: 500 });
     }
 }

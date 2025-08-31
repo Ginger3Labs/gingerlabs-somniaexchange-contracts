@@ -40,23 +40,15 @@ export default function Home() {
   const [infoMessage, setInfoMessage] = useState<string>('Başlatılıyor...');
   const [cacheTimestamp, setCacheTimestamp] = useState<number | null>(null);
   const [totalPortfolioValue, setTotalPortfolioValue] = useState<number>(0);
-  const [cacheKey, setCacheKey] = useState<string>('');
   const [signerAddress, setSignerAddress] = useState<string>('');
   const [txStatus, setTxStatus] = useState<{ [pairAddress: string]: string }>({});
   const [txError, setTxError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [minValue, setMinValue] = useState<string>('');
   const [maxValue, setMaxValue] = useState<string>('');
-  const [sortBy, setSortBy] = useState<string>('value');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [selectedPositions, setSelectedPositions] = useState<Set<string>>(new Set());
-  const [filterTokenAddress, setFilterTokenAddress] = useState<string>('');
+  const [sortBy,] = useState<string>('value');
+  const [sortOrder,] = useState<'asc' | 'desc'>('desc');
   const [withdrawPercentages, setWithdrawPercentages] = useState<{ [pairAddress: string]: number }>({});
-  const [bulkWithdrawPercentage, setBulkWithdrawPercentage] = useState<number>(100);
-  const [directWithdrawPairAddress, setDirectWithdrawPairAddress] = useState<string>('');
-  const [directWithdrawPercentage, setDirectWithdrawPercentage] = useState<number>(100);
-  const [directWithdrawStatus, setDirectWithdrawStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
-  const [directWithdrawError, setDirectWithdrawError] = useState<string | null>(null);
   const [estimatedTargetTokenValues, setEstimatedTargetTokenValues] = useState<Map<string, { token0: string, token1: string, total: string }>>(new Map());
   const [isEstimating, setIsEstimating] = useState<Set<string>>(new Set());
   const [tokenSymbolMap, setTokenSymbolMap] = useState<Map<string, string>>(() => {
@@ -64,7 +56,6 @@ export default function Home() {
     const cached = localStorage.getItem('tokenSymbolMapCache');
     return cached ? new Map(JSON.parse(cached)) : new Map();
   });
-  const [refreshingPosition, setRefreshingPosition] = useState<string | null>(null);
   const [trackedBalances, setTrackedBalances] = useState<TrackedTokenBalance[]>([]);
   const [targetTokenSymbol, setTargetTokenSymbol] = useState<string>('');
   const isScanningRef = useRef(false);
@@ -111,7 +102,7 @@ export default function Home() {
             const tokenContract = new ethers.Contract(addr, ERC20ABI.abi, provider);
             const symbol = await tokenContract.symbol();
             newSymbols.set(addr.toLowerCase(), symbol);
-          } catch (e) {
+          } catch {
             newSymbols.set(addr.toLowerCase(), addr.slice(0, 6));
           }
         }));
@@ -143,7 +134,6 @@ export default function Home() {
     const walletAddress = WALLET_TO_CHECK;
     setSignerAddress(walletAddress);
     const currentCacheKey = `${CACHE_KEY_PREFIX}${walletAddress}_${TARGET_TOKEN_ADDRESS}`;
-    setCacheKey(currentCacheKey);
 
     let initialScanIndex = 0;
     let previouslyFoundPositions: LpPosition[] = [];
@@ -188,7 +178,7 @@ export default function Home() {
           const decimals = await tokenContract.decimals();
           decimalsCache.set(address, Number(decimals));
           return Number(decimals);
-        } catch (e) {
+        } catch {
           decimalsCache.set(address, 18); return 18;
         }
       };
@@ -291,7 +281,7 @@ export default function Home() {
                     poolShare: (Number((bn_balance * 10000n) / bn_totalSupply) / 100).toFixed(2),
                     totalValueUSD: ethers.formatUnits(positionValue, PRICE_PRECISION),
                   };
-                } catch (e) { return null; }
+                } catch { return null; }
               });
 
               const newPositions = (await Promise.all(positionPromises)).filter((p): p is LpPosition => p !== null);
@@ -318,17 +308,19 @@ export default function Home() {
 
           await Promise.race([batchProcessing(), timeoutPromise]);
 
-        } catch (batchError: any) {
-          console.error(batchError.message);
-          setError(`Bir hata oluştu: ${batchError.message}. Bir sonraki partiden devam ediliyor...`);
+        } catch (batchError: unknown) {
+          const message = batchError instanceof Error ? batchError.message : String(batchError);
+          console.error(message);
+          setError(`Bir hata oluştu: ${message}. Bir sonraki partiden devam ediliyor...`);
         }
       }
 
       setTokenSymbolMap(prev => new Map([...prev, ...localTokenSymbolMap]));
       setInfoMessage('Tarama tamamlandı.');
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Veri alınırken bir hata oluştu.';
       console.error('Veri yükleme hatası:', err);
-      setError(err.message || 'Veri alınırken bir hata oluştu.');
+      setError(message);
       setInfoMessage('Hata oluştu.');
     } finally {
       setIsLoading(false);
@@ -340,7 +332,7 @@ export default function Home() {
     // Bu fonksiyonun da TARGET_TOKEN_ADDRESS'e göre güncellenmesi gerekir.
     // Şimdilik ana yenileme fonksiyonu yeterlidir.
     console.log(`Updating position ${pairAddress}...`);
-  }, [WALLET_TO_CHECK, TARGET_TOKEN_ADDRESS]);
+  }, []);
 
   const fetchTrackedBalances = useCallback(async () => {
     const trackedTokensEnv = process.env.NEXT_PUBLIC_TRACKED_TOKEN_ADDRESSES || '';
@@ -378,10 +370,6 @@ export default function Home() {
     // Tüm state'i ve çalışan işlemleri sıfırlamanın en kesin yolu sayfayı yeniden yüklemektir.
     window.location.reload();
   }, []);
-
-  const handleFilterByToken = useCallback(() => {
-    // Bu fonksiyonun mantığı değişebilir veya kaldırılabilir.
-  }, [filterTokenAddress]);
 
   const filteredAndSortedPositions = useMemo(() => {
     let filtered = [...positions];
@@ -431,9 +419,10 @@ export default function Home() {
       setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'success' }));
       await updateSinglePosition(position.pairAddress);
       setTimeout(() => setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'idle' })), 3000);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'İşlem başarısız oldu.';
       console.error("Withdraw error:", error);
-      setTxError(error.message);
+      setTxError(message);
       setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'error' }));
       setTimeout(() => {
         setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'idle' }));
@@ -441,10 +430,6 @@ export default function Home() {
       }, 5000);
     }
   }, [updateSinglePosition, TARGET_TOKEN_ADDRESS]);
-
-  const handleDirectWithdraw = useCallback(async () => {
-    // Bu fonksiyon da API'ye targetTokenAddress göndermeli
-  }, [directWithdrawPairAddress, directWithdrawPercentage, positions, updateSinglePosition, TARGET_TOKEN_ADDRESS]);
 
   useEffect(() => {
     const estimateWithdrawValue = async () => {
@@ -466,7 +451,7 @@ export default function Home() {
           const decimalsNum = Number(decimals);
           decimalsCache.set(address, decimalsNum);
           return decimalsNum;
-        } catch (e) {
+        } catch {
           decimalsCache.set(address, 18); return 18;
         }
       };
@@ -516,7 +501,7 @@ export default function Home() {
     };
     const debounceTimeout = setTimeout(() => estimateWithdrawValue(), 400);
     return () => clearTimeout(debounceTimeout);
-  }, [withdrawPercentages, positions, provider, ROUTER_ADDRESS, FACTORY_ADDRESS, TARGET_TOKEN_ADDRESS]);
+  }, [withdrawPercentages, positions, provider, ROUTER_ADDRESS, FACTORY_ADDRESS, TARGET_TOKEN_ADDRESS, estimatedTargetTokenValues, isEstimating.size]);
 
   const renderRoute = (route: string[] | undefined) => {
     if (!route || route.length === 0) return null;
