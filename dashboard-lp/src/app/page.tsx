@@ -485,26 +485,59 @@ export default function Home() {
         return num;
       };
 
-      const getTokenPriceSimple = async (tokenAddress: string): Promise<string> => {
-        if (tokenAddress.toLowerCase() === WSTT_ADDRESS.toLowerCase()) return '1.0';
+      const getTokenPriceSimple = async (tokenAddress: string): Promise<{ price: string, route: string[] }> => {
+        const address = tokenAddress.toLowerCase();
+        if (address === WSTT_ADDRESS.toLowerCase()) return { price: '1.0', route: [WSTT_ADDRESS] };
+
+        // En iyi rotayı bulmak için gelişmiş fonksiyonu kullanalım
+        // `pairsGraph` state'inin güncel olduğundan emin olmalıyız.
+        if (pairsGraph.size === 0) {
+          console.warn("Tekli güncelleme sırasında takas grafiği boş. Basit fiyatlandırma kullanılıyor.");
+          try {
+            const tokenInDecimals = await getDecimals(tokenAddress);
+            const wsttDecimals = await getDecimals(WSTT_ADDRESS);
+            const amountIn = ethers.parseUnits('1', tokenInDecimals);
+            const amountsOut = await router.getAmountsOut(amountIn, [tokenAddress, WSTT_ADDRESS]);
+            const price = ethers.formatUnits(amountsOut[amountsOut.length - 1], wsttDecimals);
+            return { price, route: [tokenAddress, WSTT_ADDRESS] };
+          } catch (e) {
+            return { price: '0', route: [] };
+          }
+        }
+
         try {
           const tokenInDecimals = await getDecimals(tokenAddress);
           const wsttDecimals = await getDecimals(WSTT_ADDRESS);
           const amountIn = ethers.parseUnits('1', tokenInDecimals);
-          const amountsOut = await router.getAmountsOut(amountIn, [tokenAddress, WSTT_ADDRESS]);
-          return ethers.formatUnits(amountsOut[amountsOut.length - 1], wsttDecimals);
-        } catch (e) {
-          return '0';
+
+          const { amount: bestAmountOut, path: bestPath } = await getBestAmountOut(
+            tokenAddress,
+            WSTT_ADDRESS,
+            amountIn,
+            pairsGraph, // Component state'inden gelen güncel grafiği kullan
+            ROUTER_ADDRESS,
+            provider
+          );
+
+          if (bestAmountOut === 0n) {
+            return { price: '0', route: [] };
+          }
+
+          const priceString = ethers.formatUnits(bestAmountOut, wsttDecimals);
+          return { price: priceString, route: bestPath };
+        } catch (error) {
+          console.error(`[updateSinglePosition] Fiyat alınamadı ${tokenAddress}:`, error);
+          return { price: '0', route: [] };
         }
       };
 
-      const [token0PriceStr, token1PriceStr] = await Promise.all([
+      const [price0Result, price1Result] = await Promise.all([
         getTokenPriceSimple(token0Address),
         getTokenPriceSimple(token1Address)
       ]);
 
-      const token0Price = ethers.parseUnits(token0PriceStr, PRICE_PRECISION);
-      const token1Price = ethers.parseUnits(token1PriceStr, PRICE_PRECISION);
+      const token0Price = ethers.parseUnits(price0Result.price, PRICE_PRECISION);
+      const token1Price = ethers.parseUnits(price1Result.price, PRICE_PRECISION);
       const [token0Decimals, token1Decimals] = await Promise.all([getDecimals(token0Address), getDecimals(token1Address)]);
 
       const bn_balance = BigInt(balance);

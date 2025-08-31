@@ -84,49 +84,106 @@ export async function getBestAmountOut(
 
     const router = new ethers.Contract(routerAddress, RouterABI.abi, provider);
     const MAX_HOPS = 4;
+
+    // --- Aşama 1: Öncelikli Token'lar ile En İyi Rotayı Ara ---
+    const priorityTokensStr = process.env.NEXT_PUBLIC_PRIORITY_TOKENS || '';
+    const priorityTokenSet = new Set(priorityTokensStr.split(',').map(t => t.trim().toLowerCase()));
+    priorityTokenSet.add(tokenInAddress.toLowerCase());
+    priorityTokenSet.add(tokenOutAddress.toLowerCase());
+
     let bestAmountOut = 0n;
     let bestPath: string[] = [];
 
-    const queue: { path: string[], currentAmount: bigint }[] = [{ path: [tokenInAddress], currentAmount: amountIn }];
-    const visitedRoutes = new Set<string>(); // Ziyaret edilen rotaları (token çiftlerini) takip etmek için
+    const findPaths = async (isPriorityOnly: boolean) => {
+        const queue: string[][] = [[tokenInAddress]];
+        const foundPaths: string[][] = [];
 
-    while (queue.length > 0) {
-        const { path, currentAmount } = queue.shift()!;
-        const currentToken = path[path.length - 1];
+        while (queue.length > 0) {
+            const path = queue.shift()!;
+            const currentToken = path[path.length - 1];
 
-        if (path.length - 1 >= MAX_HOPS) {
-            continue;
-        }
+            if (path.length > MAX_HOPS) continue;
 
-        const neighbors = graph.get(currentToken.toLowerCase()) || [];
-
-        for (const neighbor of neighbors) {
-            const nextToken = neighbor.otherToken;
-
-            // Döngüleri önlemek için bir sonraki token'ın yolda olup olmadığını kontrol et
-            if (path.map(p => p.toLowerCase()).includes(nextToken.toLowerCase())) {
+            if (currentToken.toLowerCase() === tokenOutAddress.toLowerCase()) {
+                foundPaths.push(path);
                 continue;
             }
 
-            const newPath = [...path, nextToken];
+            const neighbors = graph.get(currentToken.toLowerCase()) || [];
+            for (const neighbor of neighbors) {
+                const nextToken = neighbor.otherToken;
+                if (path.map(p => p.toLowerCase()).includes(nextToken.toLowerCase())) continue;
 
-            try {
-                const amountsOut = await router.getAmountsOut(currentAmount, [currentToken, nextToken]);
-                const nextAmount = amountsOut[1];
+                if (isPriorityOnly && !priorityTokenSet.has(nextToken.toLowerCase())) continue;
+                
+                const newPath = [...path, nextToken];
+                queue.push(newPath);
+            }
+        }
+        return foundPaths;
+    };
 
-                if (nextToken.toLowerCase() === tokenOutAddress.toLowerCase()) {
-                    if (nextAmount > bestAmountOut) {
-                        bestAmountOut = nextAmount;
-                        bestPath = newPath;
-                    }
-                } else {
-                    queue.push({ path: newPath, currentAmount: nextAmount });
+    // Öncelikli rotaları bul
+    const priorityPaths = await findPaths(true);
+
+    if (priorityPaths.length > 0) {
+        const amountsOutPromises = priorityPaths.map(path =>
+            router.getAmountsOut(amountIn, path).catch(() => null)
+        );
+        const results = await Promise.all(amountsOutPromises);
+
+        for (let i = 0; i < results.length; i++) {
+            if (results[i]) {
+                const amount = results[i][results[i].length - 1];
+                if (amount > bestAmountOut) {
+                    bestAmountOut = amount;
+                    bestPath = priorityPaths[i];
                 }
-            } catch (e) {
-                // Bu rota geçerli değilse (likidite yok vb.), görmezden gel ve devam et.
             }
         }
     }
 
-    return { amount: bestAmountOut, path: bestPath };
+    // Eğer öncelikli rotalardan bir sonuç geldiyse, onu döndür.
+    if (bestAmountOut > 0n) {
+        return { amount: bestAmountOut, path: bestPath };
+    }
+
+    // --- Aşama 2: Öncelikli Rota Bulunamazsa, İlk Geçerli Rotayı Hızla Bul ---
+    const queue: string[][] = [[tokenInAddress]];
+    const visited = new Set<string>([tokenInAddress.toLowerCase()]);
+
+    while (queue.length > 0) {
+        const path = queue.shift()!;
+        const currentToken = path[path.length - 1];
+
+        if (path.length > MAX_HOPS) continue;
+
+        const neighbors = graph.get(currentToken.toLowerCase()) || [];
+        for (const neighbor of neighbors) {
+            const nextToken = neighbor.otherToken;
+            const nextTokenLower = nextToken.toLowerCase();
+
+            if (visited.has(nextTokenLower)) continue;
+            visited.add(nextTokenLower);
+
+            const newPath = [...path, nextToken];
+
+            if (nextTokenLower === tokenOutAddress.toLowerCase()) {
+                try {
+                    const amountsOut = await router.getAmountsOut(amountIn, newPath);
+                    const finalAmount = amountsOut[amountsOut.length - 1];
+                    if (finalAmount > 0n) {
+                        // İlk geçerli rotayı bulduk, hemen döndür.
+                        return { amount: finalAmount, path: newPath };
+                    }
+                } catch (e) {
+                    // Bu yol geçerli değil, devam et.
+                }
+            }
+            queue.push(newPath);
+        }
+    }
+
+    // Hiçbir rota bulunamadı.
+    return { amount: 0n, path: [] };
 }
