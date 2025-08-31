@@ -1,8 +1,46 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Ana Renkler */
+  --color-primary: #3b82f6;
+  --color-primary-light: #60a5fa;
+  --color-primary-dark: #2563eb;
+  
+  /* Başarı Renkleri */
+  --color-success: #10b981;
+  --color-success-light: #34d399;
+  --color-success-dark: #059669;
+  
+  /* Uyarı Renkleri */
+  --color-warning: #f59e0b;
+  --color-warning-light: #fbbf24;
+  --color-warning-dark: #d97706;
+  
+  /* Hata Renkleri */
+  --color-error: #ef4444;
+  --color-error-light: #f87171;
+  --color-error-dark: #dc2626;
+  
+  /* Nötr Renkler */
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1f2937;
+  --color-gray-900: #111827;
+  
+  /* Tema Renkleri */
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  
+  /* Özel Gradyanlar */
+  --gradient-blue-purple: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  --gradient-green-blue: linear-gradient(135deg, #10b981 0%, #3b82f6 100%);
+  --gradient-orange-red: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
 }
 
 @theme inline {
@@ -12,17 +50,12 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 @keyframes fadeIn {
@@ -36,6 +69,23 @@ body {
   }
 }
 
+@keyframes gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.5s ease-out forwards;
+}
+
+.animate-gradient {
+  background-size: 200% auto;
+  animation: gradient 8s linear infinite;
 }

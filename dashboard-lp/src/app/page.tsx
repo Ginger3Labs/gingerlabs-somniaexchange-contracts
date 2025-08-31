@@ -216,7 +216,7 @@ export default function Home() {
       const pairsToScan = Number(pairCount);
       if (initialScanIndex === 0) setInfoMessage(`Toplam ${pairsToScan} çift taranıyor...`);
 
-      const BATCH_SIZE = 50;
+      const BATCH_SIZE = 2;
       const BATCH_TIMEOUT = 30000; // 30 saniye
       const localTokenSymbolMap = new Map();
 
@@ -524,64 +524,141 @@ export default function Home() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center p-12 bg-gray-900 text-white">
-      <div className="z-10 w-full max-w-5xl">
-        <div className="bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div className="flex-1">
-              <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-500 text-transparent bg-clip-text">
-                Somnia LP Dashboard
-              </h1>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-400">Cüzdan:</span>
-                  <span className="font-mono text-sm bg-gray-700/50 px-3 py-1 rounded-full">{signerAddress}</span>
+    <main className="flex min-h-screen flex-col items-center p-6 md:p-12 bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white">
+      <div className="z-10 w-full max-w-7xl">
+        {/* Header Section */}
+        <div className="bg-gray-800/80 backdrop-blur-lg rounded-2xl shadow-2xl border border-gray-700/50 overflow-hidden">
+          {/* Top Banner */}
+          <div className="bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-pink-500/10 border-b border-gray-700/50 p-8">
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
+              {/* Logo and Title */}
+              <div className="flex-1">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
+                    <span className="text-2xl font-bold">LP</span>
+                  </div>
+                  <div>
+                    <h1 className="text-4xl font-extrabold bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 text-transparent bg-clip-text animate-gradient">
+                      Somnia LP Dashboard
+                    </h1>
+                    <p className="text-gray-400 mt-1">Likidite Havuzu Yönetim Paneli</p>
+                  </div>
                 </div>
-                {totalPortfolioValue > 0 && (
+              </div>
+
+              {/* Status and Actions */}
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3 bg-gray-900/40 backdrop-blur px-4 py-2 rounded-xl border border-gray-700/30">
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-400">Toplam Varlık:</span>
-                    <span className="text-2xl font-bold text-green-400">{formatToDecimals(totalPortfolioValue)} {targetTokenSymbol}</span>
+                    <div className={`w-2 h-2 rounded-full ${isLoading ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'}`}></div>
+                    <span className={`font-medium ${isLoading ? 'text-yellow-400' : 'text-green-400'}`}>
+                      {isLoading ? 'Yükleniyor...' : 'Hazır'}
+                    </span>
                   </div>
-                )}
-                {cacheTimestamp && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-400">Son Güncelleme:</span>
-                    <span className="text-sm text-gray-300">{new Date(cacheTimestamp).toLocaleString()}</span>
-                  </div>
-                )}
-                {trackedBalances.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-gray-700/50">
-                    <h3 className="text-lg font-semibold mb-2 text-gray-300">Takip Edilen Varlıklar</h3>
-                    <div className="space-y-2">
-                      {trackedBalances.map(token => (
-                        <div key={token.address} className="flex justify-between items-center bg-gray-700/30 px-3 py-2 rounded-md">
-                          <span className="font-bold text-white">{token.symbol}</span>
-                          <span className="font-mono text-green-400">{formatToDecimals(parseFloat(token.balance))}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRefresh}
+                    disabled={isLoading}
+                    className="bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 font-medium p-2 rounded-lg border border-blue-500/30 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={handleHardRefresh}
+                    className="bg-red-500/20 hover:bg-red-500/30 text-red-400 font-medium p-2 rounded-lg border border-red-500/30 transition-all duration-300"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    className="bg-gray-700/30 hover:bg-gray-700/50 text-gray-300 font-medium p-2 rounded-lg border border-gray-600/30 transition-all duration-300"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 bg-gray-700/30 px-4 py-2 rounded-lg">
-                <span className="text-gray-400">Durum:</span>
-                <span className={`font-medium ${isLoading ? 'text-yellow-400' : 'text-green-400'}`}>
-                  {isLoading ? 'Yükleniyor...' : 'Hazır'}
-                </span>
+          </div>
+
+          {/* Info Cards */}
+          <div className="p-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {/* Wallet Card */}
+              <div className="bg-gray-900/30 rounded-xl p-4 border border-gray-700/30">
+                <div className="flex items-center gap-3 mb-2">
+                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  <span className="text-gray-400">Cüzdan</span>
+                </div>
+                <div className="font-mono text-sm text-white/90 break-all">
+                  {signerAddress}
+                </div>
               </div>
-              <button onClick={handleRefresh} disabled={isLoading} className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed transition-all duration-300 shadow-lg flex items-center gap-2">
-                <span>Yenile</span>
-                {!isLoading && <span className="text-lg">↻</span>}
-              </button>
-              <button onClick={handleHardRefresh} className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 shadow-lg flex items-center gap-2">
-                <span>Hard Refresh</span>
-                <span className="text-lg">🗑️</span>
-              </button>
-              <button onClick={handleLogout} className="bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-600 hover:to-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 shadow-lg flex items-center gap-2">
-                <span>Çıkış Yap</span>
-              </button>
+
+              {/* Total Value Card */}
+              {totalPortfolioValue > 0 && (
+                <div className="bg-gradient-to-r from-green-500/10 to-green-600/10 border border-green-500/20 rounded-xl p-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-gray-400">Toplam Varlık</span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-bold text-green-400">{formatToDecimals(totalPortfolioValue)}</span>
+                    <span className="text-green-500">{targetTokenSymbol}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Last Update Card */}
+              {cacheTimestamp && (
+                <div className="bg-gray-900/30 rounded-xl p-4 border border-gray-700/30">
+                  <div className="flex items-center gap-3 mb-2">
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-gray-400">Son Güncelleme</span>
+                  </div>
+                  <span className="text-lg text-white/90">{new Date(cacheTimestamp).toLocaleString()}</span>
+                </div>
+              )}
+
+              {/* Tracked Assets Summary */}
+              {trackedBalances.length > 0 && (
+                <div className="bg-gray-900/30 rounded-xl p-4 border border-gray-700/30 col-span-1 lg:col-span-4">
+                  <div className="flex items-center gap-3 mb-4">
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    <span className="text-gray-400 text-lg">Takip Edilen Varlıklar</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {trackedBalances.map(token => (
+                      <div key={token.address} className="bg-gray-800/50 px-4 py-3 rounded-lg border border-gray-700/30 flex justify-between items-center hover:border-blue-500/30 transition-all duration-300">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-600/20 flex items-center justify-center border border-gray-700/30">
+                            <span className="font-bold text-white/90">{token.symbol.charAt(0)}</span>
+                          </div>
+                          <div>
+                            <span className="font-medium text-white/90 block">{token.symbol}</span>
+                            <span className="text-xs text-gray-400">{token.address.slice(0, 6)}...{token.address.slice(-4)}</span>
+                          </div>
+                        </div>
+                        <span className="font-mono text-green-400 text-lg">{formatToDecimals(parseFloat(token.balance))}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -589,103 +666,252 @@ export default function Home() {
 
       {/* Hata Mesajları */}
       {(error || txError) && (
-        <div className="w-full max-w-5xl mt-4">
-          <div className="bg-red-900/20 border border-red-500/50 rounded-lg p-4">
-            <p className="text-red-400">{error || txError}</p>
+        <div className="w-full max-w-7xl mt-4 animate-fade-in">
+          <div className="bg-red-900/20 backdrop-blur-sm border border-red-500/50 rounded-2xl p-6 flex items-center gap-4">
+            <div className="flex-shrink-0">
+              <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <p className="text-red-400 flex-grow">{error || txError}</p>
+            <button
+              onClick={() => { setError(null); setTxError(null); }}
+              className="text-red-400 hover:text-red-300 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         </div>
       )}
 
       <div className="mt-8 w-full max-w-8xl">
         {isLoading && (
-          <div className="bg-blue-900/20 border border-blue-500/50 rounded-lg p-4 mb-6">
-            <p className="text-blue-400">{infoMessage}</p>
+          <div className="bg-blue-900/20 backdrop-blur-sm border border-blue-500/50 rounded-2xl p-6 mb-8 animate-fade-in">
+            <div className="flex items-center gap-4">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+              <div className="flex-grow">
+                <p className="text-blue-400 text-lg">{infoMessage}</p>
+                <div className="w-full h-1 bg-blue-900/50 rounded-full mt-3 overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 rounded-full animate-pulse"
+                    style={{ width: '50%' }}
+                  ></div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
         {/* Filtreleme */}
-        <div className="mb-6 bg-gray-800 p-4 rounded-lg">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Token/Adres Ara</label>
-              <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Token sembolü veya adres..." className="w-full px-3 py-2 bg-gray-700 rounded text-white" />
+        <div className="mb-8 bg-gray-800/80 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-gray-700/50">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-2 h-2 rounded-full bg-blue-400"></div>
+            <h2 className="text-lg font-semibold text-white">Filtrele ve Sırala</h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-300">Token/Adres Ara</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Token sembolü veya adres..."
+                  className="w-full px-4 py-3 bg-gray-900/50 rounded-xl border border-gray-700/30 focus:border-blue-500/50 focus:outline-none transition-colors pl-10"
+                />
+                <svg
+                  className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Minimum Değer ({targetTokenSymbol})</label>
-              <input type="number" value={minValue} onChange={(e) => setMinValue(e.target.value)} placeholder="Min değer..." className="w-full px-3 py-2 bg-gray-700 rounded text-white" />
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-300">Minimum Değer ({targetTokenSymbol})</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={minValue}
+                  onChange={(e) => setMinValue(e.target.value)}
+                  placeholder="Min değer..."
+                  className="w-full px-4 py-3 bg-gray-900/50 rounded-xl border border-gray-700/30 focus:border-blue-500/50 focus:outline-none transition-colors pl-10"
+                />
+                <svg
+                  className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4M4 12l6-6m-6 6l6 6" />
+                </svg>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Maksimum Değer ({targetTokenSymbol})</label>
-              <input type="number" value={maxValue} onChange={(e) => setMaxValue(e.target.value)} placeholder="Max değer..." className="w-full px-3 py-2 bg-gray-700 rounded text-white" />
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-300">Maksimum Değer ({targetTokenSymbol})</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={maxValue}
+                  onChange={(e) => setMaxValue(e.target.value)}
+                  placeholder="Max değer..."
+                  className="w-full px-4 py-3 bg-gray-900/50 rounded-xl border border-gray-700/30 focus:border-blue-500/50 focus:outline-none transition-colors pl-10"
+                />
+                <svg
+                  className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12h16m-6-6l6 6-6 6" />
+                </svg>
+              </div>
             </div>
-            {/* Sıralama */}
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4  gap-4">
           {filteredAndSortedPositions.map((pos) => (
-            <div key={pos.pairAddress} className="bg-gray-800 p-6 rounded-xl shadow-lg flex flex-col">
-              <div className="flex-grow">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="text-xl font-bold">{pos.token0.symbol}/{pos.token1.symbol}</h3>
-                    <p className="text-xs text-gray-400 font-mono">
-                      {`${pos.pairAddress.slice(0, 6)}...${pos.pairAddress.slice(-4)}`}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-2xl font-bold text-green-400">{formatToDecimals(Number(pos.totalValueUSD))} {targetTokenSymbol}</span>
-                  </div>
-                </div>
-                <div className="space-y-3 text-sm mt-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400">{pos.token0.symbol}</span>
+            <div key={pos.pairAddress} className="bg-gray-800/80 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-gray-700/50 flex flex-col group hover:border-blue-500/30 transition-all duration-300">
+              <div className="flex-grow space-y-2">
+                {/* Header */}
+                <div className="space-y-3">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 text-transparent bg-clip-text">
+                        {pos.token0.symbol}/{pos.token1.symbol}
+                      </h3>
+                      <p className="text-xs text-gray-400 font-mono mt-1">
+                        {`${pos.pairAddress.slice(0, 6)}...${pos.pairAddress.slice(-4)}`}
+                      </p>
+                    </div>
                     <div className="text-right">
-                      <span className="font-mono">{formatToDecimals(Number(pos.token0.value))}</span>
-                      <div className="text-xs text-gray-500">{renderRoute(pos.token0.route)}</div>
+                      <div className="bg-green-500/10 border border-green-500/20 rounded-xl px-4 py-2">
+                        <span className="block text-2xl font-bold text-green-400">
+                          {formatToDecimals(Number(pos.totalValueUSD))}
+                        </span>
+                        <span className="text-sm text-green-500">{targetTokenSymbol}</span>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400">{pos.token1.symbol}</span>
-                    <div className="text-right">
-                      <span className="font-mono">{formatToDecimals(Number(pos.token1.value))}</span>
-                      <div className="text-xs text-gray-500">{renderRoute(pos.token1.route)}</div>
+                </div>
+
+                {/* Token Details */}
+                <div className="space-y-4">
+                  {/* Token 0 */}
+                  <div className="bg-gray-900/30 rounded-xl p-4 border border-gray-700/30">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-gray-300 font-medium">{pos.token0.symbol}</span>
+                      <span className="font-mono text-white">{formatToDecimals(Number(pos.token0.value))}</span>
                     </div>
+                    {renderRoute(pos.token0.route) && (
+                      <div className="text-xs text-gray-500 bg-gray-800/50 px-3 py-1.5 rounded-lg">
+                        {renderRoute(pos.token0.route)}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex justify-between items-center pt-2 border-t border-gray-700/50">
-                    <span className="text-gray-400">LP Bakiyesi</span>
-                    <span className="font-mono">{formatToDecimals(Number(pos.lpBalance))}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400">Havuz Payı</span>
-                    <span className="font-mono">{Number(pos.poolShare).toFixed(2)}%</span>
+
+                  {/* Token 1 */}
+                  <div className="bg-gray-900/30 rounded-xl p-4 border border-gray-700/30">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-gray-300 font-medium">{pos.token1.symbol}</span>
+                      <span className="font-mono text-white">{formatToDecimals(Number(pos.token1.value))}</span>
+                    </div>
+                    {renderRoute(pos.token1.route) && (
+                      <div className="text-xs text-gray-500 bg-gray-800/50 px-3 py-1.5 rounded-lg">
+                        {renderRoute(pos.token1.route)}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="bg-gray-700/30 p-4 rounded-lg mb-4 mt-4">
-                  {(isEstimating.has(pos.pairAddress) || estimatedTargetTokenValues.has(pos.pairAddress)) && (
-                    <div className="pt-2 mt-2 border-t border-gray-600/50">
-                      {isEstimating.has(pos.pairAddress) ? <p>Hesaplanıyor...</p> : (
-                        estimatedTargetTokenValues.get(pos.pairAddress) && (
-                          <div>
-                            <p>Tahmini Getiri (%{withdrawPercentages[pos.pairAddress] || 0})</p>
-                            <p>{pos.token0.symbol}: {formatToDecimals(parseFloat(estimatedTargetTokenValues.get(pos.pairAddress)!.token0))} {targetTokenSymbol}</p>
-                            <p>{pos.token1.symbol}: {formatToDecimals(parseFloat(estimatedTargetTokenValues.get(pos.pairAddress)!.token1))} {targetTokenSymbol}</p>
-                            <p>≈ {formatToDecimals(parseFloat(estimatedTargetTokenValues.get(pos.pairAddress)!.total))} {targetTokenSymbol}</p>
+
+                {/* Pool Stats */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gray-900/30 rounded-xl p-4 border border-gray-700/30">
+                    <span className="block text-sm text-gray-400 mb-1">LP Bakiyesi</span>
+                    <span className="font-mono text-white">{formatToDecimals(Number(pos.lpBalance))}</span>
+                  </div>
+                  <div className="bg-gray-900/30 rounded-xl p-4 border border-gray-700/30">
+                    <span className="block text-sm text-gray-400 mb-1">Havuz Payı</span>
+                    <span className="font-mono text-white">{Number(pos.poolShare).toFixed(2)}%</span>
+                  </div>
+                </div>
+
+                {/* Estimated Returns */}
+                {(isEstimating.has(pos.pairAddress) || estimatedTargetTokenValues.has(pos.pairAddress)) && (
+                  <div className="bg-blue-900/20 rounded-xl p-4 border border-blue-500/20">
+                    {isEstimating.has(pos.pairAddress) ? (
+                      <div className="flex items-center gap-3">
+                        <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                        <p className="text-blue-400">Hesaplanıyor...</p>
+                      </div>
+                    ) : (
+                      estimatedTargetTokenValues.get(pos.pairAddress) && (
+                        <div className="space-y-2">
+                          <p className="text-blue-400 font-medium">Tahmini Getiri (%{withdrawPercentages[pos.pairAddress] || 0})</p>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-gray-900/30 rounded-lg p-2">
+                              <span className="block text-xs text-gray-400">{pos.token0.symbol}</span>
+                              <span className="text-sm font-mono text-white">
+                                {formatToDecimals(parseFloat(estimatedTargetTokenValues.get(pos.pairAddress)!.token0))} {targetTokenSymbol}
+                              </span>
+                            </div>
+                            <div className="bg-gray-900/30 rounded-lg p-2">
+                              <span className="block text-xs text-gray-400">{pos.token1.symbol}</span>
+                              <span className="text-sm font-mono text-white">
+                                {formatToDecimals(parseFloat(estimatedTargetTokenValues.get(pos.pairAddress)!.token1))} {targetTokenSymbol}
+                              </span>
+                            </div>
                           </div>
-                        )
-                      )}
-                    </div>
-                  )}
-                </div>
+                          <div className="bg-blue-500/10 rounded-lg p-2 mt-2">
+                            <span className="block text-xs text-blue-400">Toplam</span>
+                            <span className="text-sm font-mono text-blue-300">
+                              ≈ {formatToDecimals(parseFloat(estimatedTargetTokenValues.get(pos.pairAddress)!.total))} {targetTokenSymbol}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="mt-auto">
-                {/* Çekim Kontrolleri */}
-                <div className="mb-4">
-                  <input type="number" min="1" max="100" value={withdrawPercentages[pos.pairAddress] || ''} onChange={(e) => setWithdrawPercentages(prev => ({ ...prev, [pos.pairAddress]: parseInt(e.target.value, 10) || 0 }))} className="w-full px-3 py-2 bg-gray-700 rounded" />
+
+              {/* Withdraw Controls */}
+              <div className="mt-6 pt-4 border-t border-gray-700/30">
+                <div className="flex gap-3 mb-4">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={withdrawPercentages[pos.pairAddress] || ''}
+                    onChange={(e) => setWithdrawPercentages(prev => ({ ...prev, [pos.pairAddress]: parseInt(e.target.value, 10) || 0 }))}
+                    className="flex-1 px-4 py-3 bg-gray-900/50 rounded-xl border border-gray-700/30 focus:border-blue-500/50 focus:outline-none transition-colors"
+                    placeholder="Yüzde girin..."
+                  />
+                  <button
+                    onClick={() => handleWithdraw(pos, withdrawPercentages[pos.pairAddress] || 100)}
+                    disabled={txStatus[pos.pairAddress] === 'pending'}
+                    className="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium py-3 px-6 rounded-xl disabled:from-gray-600 disabled:to-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 shadow-lg"
+                  >
+                    {txStatus[pos.pairAddress] === 'pending' ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Çekiliyor...</span>
+                      </div>
+                    ) : (
+                      `Çek (%${withdrawPercentages[pos.pairAddress] || '100'})`
+                    )}
+                  </button>
                 </div>
-                <button onClick={() => handleWithdraw(pos, withdrawPercentages[pos.pairAddress] || 100)} disabled={txStatus[pos.pairAddress] === 'pending'} className="w-full bg-red-600 text-white font-bold py-3 px-4 rounded-lg">
-                  {txStatus[pos.pairAddress] === 'pending' ? 'Çekiliyor...' : `Çek (%${withdrawPercentages[pos.pairAddress] || '100'})`}
-                </button>
               </div>
             </div>
           ))}
