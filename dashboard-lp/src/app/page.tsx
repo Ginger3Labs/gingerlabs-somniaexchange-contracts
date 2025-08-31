@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { ethers } from 'ethers';
 import FactoryABI from '@/abis/SomniaExchangeFactory.json';
 import PairABI from '@/abis/SomniaExchangePair.json';
@@ -59,6 +60,7 @@ export default function Home() {
   const [trackedBalances, setTrackedBalances] = useState<TrackedTokenBalance[]>([]);
   const [targetTokenSymbol, setTargetTokenSymbol] = useState<string>('');
   const isScanningRef = useRef(false);
+  const router = useRouter();
 
   useEffect(() => {
     if (tokenSymbolMap.size > 0) {
@@ -375,6 +377,15 @@ export default function Home() {
     window.location.reload();
   }, [WALLET_TO_CHECK, TARGET_TOKEN_ADDRESS]);
 
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/logout', { method: 'POST' });
+      router.push('/login');
+    } catch (error) {
+      console.error('Failed to log out', error);
+    }
+  };
+
   const filteredAndSortedPositions = useMemo(() => {
     let filtered = [...positions];
     if (searchTerm) {
@@ -567,6 +578,9 @@ export default function Home() {
               <button onClick={handleHardRefresh} className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 shadow-lg flex items-center gap-2">
                 <span>Hard Refresh</span>
                 <span className="text-lg">🗑️</span>
+              </button>
+              <button onClick={handleLogout} className="bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-600 hover:to-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 shadow-lg flex items-center gap-2">
+                <span>Çıkış Yap</span>
               </button>
             </div>
           </div>

@@ -1,21 +1,23 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { decrypt } from '@/lib/session';
 
-export function middleware(request: NextRequest) {
-    // Get the cookie from the request
-    const isLoggedIn = request.cookies.get('isLoggedIn')?.value;
+// This function can be marked `async` if using `await` inside
+export async function middleware(request: NextRequest) {
+    const sessionCookie = request.cookies.get('session')?.value;
+    const session = await decrypt(sessionCookie);
 
     const { pathname } = request.nextUrl;
 
-    // If the user is trying to access the login page but is already logged in,
+    // If the user is trying to access the login page but has a valid session,
     // redirect them to the dashboard.
-    if (isLoggedIn && pathname === '/login') {
+    if (session && pathname === '/login') {
         return NextResponse.redirect(new URL('/', request.url));
     }
 
-    // If the user is trying to access the dashboard but is not logged in,
+    // If the user is trying to access the dashboard but does not have a valid session,
     // redirect them to the login page.
-    if (!isLoggedIn && pathname === '/') {
+    if (!session && pathname === '/') {
         return NextResponse.redirect(new URL('/login', request.url));
     }
 

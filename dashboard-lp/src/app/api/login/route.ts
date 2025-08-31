@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { cookies } from 'next/headers';
+import { createSession } from '@/lib/session';
 
 export async function POST(request: Request) {
     try {
@@ -18,15 +17,9 @@ export async function POST(request: Request) {
         }
 
         if (username === appUsername && password === appPassword) {
-            // Create a response and set the cookie on it
-            const response = NextResponse.json({ success: true });
-            response.cookies.set('isLoggedIn', 'true', {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                maxAge: 60 * 60 * 24, // 1 day
-                path: '/',
-            });
-            return response;
+            // Create the session
+            await createSession(username);
+            return NextResponse.json({ success: true });
         } else {
             return NextResponse.json(
                 { success: false, message: 'Invalid username or password' },

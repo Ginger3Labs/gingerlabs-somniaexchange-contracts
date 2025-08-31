@@ -10,12 +10,13 @@
     "backup": "node -r dotenv/config scripts/saveTotalAssets.js"
   },
   "dependencies": {
+    "dotenv": "^16.6.1",
     "ethers": "^6.15.0",
+    "jose": "^6.1.0",
     "mongodb": "^6.19.0",
     "next": "15.5.2",
     "react": "19.1.0",
-    "react-dom": "19.1.0",
-    "dotenv": "^16.6.1"
+    "react-dom": "19.1.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
