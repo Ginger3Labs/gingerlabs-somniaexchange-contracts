@@ -7,6 +7,7 @@ import PairABI from '@/abis/SomniaExchangePair.json';
 import ERC20ABI from '@/abis/IERC20.json';
 import RouterABI from '@/abis/SomniaExchangeRouter.json';
 import { formatToDecimals } from '../../format';
+import { buildTradingGraph, getBestAmountOut } from '@/lib/pathfinder';
 
 // Arayüz için veri tipleri
 interface LpPosition {
@@ -79,6 +80,21 @@ export default function Home() {
     localTokenSymbolMap.set(WSTT_ADDRESS.toLowerCase(), 'WSTT');
     localTokenSymbolMap.set(USDC_ADDRESS.toLowerCase(), 'USDC');
 
+    const symbolCache = new Map<string, string>(localTokenSymbolMap);
+    const getSymbol = async (tokenAddress: string): Promise<string> => {
+      const address = tokenAddress.toLowerCase();
+      if (symbolCache.has(address)) return symbolCache.get(address)!;
+      try {
+        const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, provider);
+        const symbol = await tokenContract.symbol();
+        symbolCache.set(address, symbol);
+        return symbol;
+      } catch (e) {
+        symbolCache.set(address, address.slice(0, 6));
+        return address.slice(0, 6);
+      }
+    };
+
     const decimalsCache = new Map<string, number>();
     const getDecimals = async (tokenAddress: string): Promise<number> => {
       const address = tokenAddress.toLowerCase();
@@ -105,33 +121,9 @@ export default function Home() {
       setPairsGraph(newPairsGraph);
     } else {
       try {
-        const pairCount = await factory.allPairsLength();
-        const pairsToScan = Number(pairCount);
-        setAnalysisMessage(`Tüm takas rotalarını analiz etmek için ${pairsToScan} çift taranıyor...`);
-        const allPairsData = new Map<string, { pairAddress: string, otherToken: string }[]>();
-        const BATCH_SIZE_GRAPH = 100;
-        for (let i = 0; i < pairsToScan; i += BATCH_SIZE_GRAPH) {
-          const batchEnd = Math.min(i + BATCH_SIZE_GRAPH, pairsToScan);
-          setAnalysisMessage(`Rota analizi: ${i + 1}-${batchEnd}/${pairsToScan}`);
-          const pairAddressPromises = Array.from({ length: batchEnd - i }, (_, k) => factory.allPairs(i + k).catch(() => null));
-          const pairAddresses = (await Promise.all(pairAddressPromises)).filter((addr): addr is string => !!addr);
-          const tokenPromises = pairAddresses.map(addr => {
-            const pairContract = new ethers.Contract(addr, PairABI.abi, provider);
-            return Promise.all([pairContract.token0(), pairContract.token1()])
-              .then(([token0, token1]) => ({ pairAddress: addr, token0, token1 }))
-              .catch(() => null);
-          });
-          const tokensData = (await Promise.all(tokenPromises)).filter((d): d is { pairAddress: string, token0: string, token1: string } => !!d);
-          for (const { pairAddress, token0, token1 } of tokensData) {
-            const t0 = token0.toLowerCase();
-            const t1 = token1.toLowerCase();
-            allPairsData.set(t0, [...(allPairsData.get(t0) || []), { pairAddress, otherToken: token1 }]);
-            allPairsData.set(t1, [...(allPairsData.get(t1) || []), { pairAddress, otherToken: token0 }]);
-          }
-        }
-        setPairsGraph(allPairsData);
-        newPairsGraph = allPairsData;
-        localStorage.setItem(CACHE_KEY_GRAPH, JSON.stringify(Array.from(allPairsData.entries())));
+        newPairsGraph = await buildTradingGraph(FACTORY_ADDRESS, provider, setAnalysisMessage);
+        setPairsGraph(newPairsGraph);
+        localStorage.setItem(CACHE_KEY_GRAPH, JSON.stringify(Array.from(newPairsGraph.entries())));
       } catch (e) {
         console.error("Rota grafiği oluşturulurken hata:", e);
         setAnalysisMessage("Rota analizi başarısız oldu.");
@@ -139,41 +131,6 @@ export default function Home() {
         return;
       }
     }
-
-    const getBestAmountOut = async (tokenInAddress: string, tokenOutAddress: string, amountIn: bigint, currentPairsGraph: Map<string, { pairAddress: string, otherToken: string }[]>): Promise<{ amount: bigint, path: string[] }> => {
-      if (tokenInAddress.toLowerCase() === tokenOutAddress.toLowerCase()) return { amount: amountIn, path: [tokenInAddress] };
-      const MAX_HOPS = 4;
-      let bestAmountOut = 0n;
-      let bestPath: string[] = [];
-      const queue: { path: string[], currentAmount: bigint }[] = [{ path: [tokenInAddress], currentAmount: amountIn }];
-      const visitedRoutes = new Set<string>();
-      while (queue.length > 0) {
-        const { path, currentAmount } = queue.shift()!;
-        const currentToken = path[path.length - 1];
-        if (path.length - 1 >= MAX_HOPS) continue;
-        const neighbors = currentPairsGraph.get(currentToken.toLowerCase()) || [];
-        for (const neighbor of neighbors) {
-          const nextToken = neighbor.otherToken;
-          const routeStr = `${currentToken.toLowerCase()}-${nextToken.toLowerCase()}`;
-          if (visitedRoutes.has(routeStr)) continue;
-          visitedRoutes.add(routeStr);
-          const newPath = [...path, nextToken];
-          try {
-            const amountsOut = await router.getAmountsOut(currentAmount, [currentToken, nextToken]);
-            const nextAmount = amountsOut[1];
-            if (nextToken.toLowerCase() === tokenOutAddress.toLowerCase()) {
-              if (nextAmount > bestAmountOut) {
-                bestAmountOut = nextAmount;
-                bestPath = newPath;
-              }
-            } else {
-              queue.push({ path: newPath, currentAmount: nextAmount });
-            }
-          } catch (e) { }
-        }
-      }
-      return { amount: bestAmountOut, path: bestPath };
-    };
 
     const priceCache = new Map<string, { price: string, route: string[] }>();
     const getTokenPriceInWSTT = async (tokenAddress: string, currentPairsGraph: Map<string, { pairAddress: string, otherToken: string }[]>): Promise<{ price: string, route: string[] }> => {
@@ -185,20 +142,15 @@ export default function Home() {
         const tokenInDecimals = await getDecimals(tokenAddress);
         const wsttDecimals = await getDecimals(WSTT_ADDRESS);
         const amountIn = ethers.parseUnits('1', tokenInDecimals);
-        let bestAmountOut = 0n;
-        let bestPath: string[] = [];
 
-        try {
-          const amounts = await router.getAmountsOut(amountIn, [tokenAddress, WSTT_ADDRESS]);
-          bestAmountOut = amounts[amounts.length - 1];
-          bestPath = [tokenAddress, WSTT_ADDRESS];
-        } catch (e) { }
-
-        const { amount: graphAmountOut, path: graphPath } = await getBestAmountOut(tokenAddress, WSTT_ADDRESS, amountIn, currentPairsGraph);
-        if (graphAmountOut > bestAmountOut) {
-          bestAmountOut = graphAmountOut;
-          bestPath = graphPath;
-        }
+        const { amount: bestAmountOut, path: bestPath } = await getBestAmountOut(
+          tokenAddress,
+          WSTT_ADDRESS,
+          amountIn,
+          currentPairsGraph,
+          ROUTER_ADDRESS,
+          provider
+        );
 
         if (bestAmountOut === 0n) {
           const result = { price: '0', route: [] };
@@ -256,6 +208,12 @@ export default function Home() {
       })
     );
 
+    const allRoutes = updatedPositions.flatMap(p => [...(p.token0.route || []), ...(p.token1.route || [])]);
+    const uniqueRouteAddresses = [...new Set(allRoutes)];
+
+    await Promise.all(uniqueRouteAddresses.map(addr => getSymbol(addr)));
+
+    setTokenSymbolMap(new Map(symbolCache));
     setPositions(updatedPositions);
     setTotalPortfolioValue(updatedPositions.reduce((sum, p) => sum + parseFloat(p.totalValueUSD), 0));
     setAnalysisMessage('Fiyatlar başarıyla güncellendi.');
@@ -278,6 +236,9 @@ export default function Home() {
     const currentCacheKey = `${CACHE_KEY_PREFIX}${walletAddress}`;
     setCacheKey(currentCacheKey);
 
+    let initialScanIndex = 0;
+    let previouslyFoundPositions: LpPosition[] = [];
+
     if (forceRefresh) {
       localStorage.removeItem(currentCacheKey);
       setPositions([]);
@@ -285,19 +246,28 @@ export default function Home() {
     } else {
       const cachedData = localStorage.getItem(currentCacheKey);
       if (cachedData) {
-        const parsed = JSON.parse(cachedData);
-        if (Date.now() - parsed.timestamp < 5 * 60 * 1000) {
-          setPositions(parsed.data);
-          setTotalPortfolioValue(parsed.data.reduce((sum: number, pos: LpPosition) => sum + parseFloat(pos.totalValueUSD), 0));
-          setCacheTimestamp(parsed.timestamp);
+        const parsed: CacheData = JSON.parse(cachedData);
+        previouslyFoundPositions = parsed.data || [];
+        setPositions(previouslyFoundPositions);
+        setTotalPortfolioValue(previouslyFoundPositions.reduce((sum: number, pos: LpPosition) => sum + parseFloat(pos.totalValueUSD), 0));
+        setCacheTimestamp(parsed.timestamp);
+
+        if (parsed.lastScannedIndex + 1 >= parsed.totalPairCount) {
+          setInfoMessage('Önbellekten yüklendi. Analiz başlatılıyor...');
           setIsLoading(false);
           setTimeout(() => buildRoutesAndReprice(parsed.data), 100);
           return;
+        } else {
+          initialScanIndex = parsed.lastScannedIndex + 1;
+          setInfoMessage(`Tarama ${initialScanIndex}. çiftten devam ediyor...`);
         }
       }
     }
 
-    setInfoMessage('Blockchain ile bağlantı kuruluyor...');
+    if (!forceRefresh && initialScanIndex === 0) {
+      setInfoMessage('Blockchain ile bağlantı kuruluyor...');
+    }
+
     try {
       const provider = new ethers.JsonRpcProvider(RPC_URL);
       const factory = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
@@ -350,12 +320,14 @@ export default function Home() {
 
       const pairCount = await factory.allPairsLength();
       const pairsToScan = Number(pairCount);
-      setInfoMessage(`Toplam ${pairsToScan} çift taranıyor...`);
-      let foundPositions: LpPosition[] = [];
+      if (initialScanIndex === 0) {
+        setInfoMessage(`Toplam ${pairsToScan} çift taranıyor...`);
+      }
+      let foundPositions: LpPosition[] = [...previouslyFoundPositions];
       const BATCH_SIZE = 100;
       const localTokenSymbolMap = new Map();
 
-      for (let i = 0; i < pairsToScan; i += BATCH_SIZE) {
+      for (let i = initialScanIndex; i < pairsToScan; i += BATCH_SIZE) {
         const batchEnd = Math.min(i + BATCH_SIZE, pairsToScan);
         setInfoMessage(`Çiftler ${i + 1}-${batchEnd}/${pairsToScan} taranıyor...`);
         const pairAddressPromises = Array.from({ length: batchEnd - i }, (_, k) => factory.allPairs(i + k).catch(() => null));
@@ -413,25 +385,25 @@ export default function Home() {
             } catch (e) { return null; }
           });
           const newPositions = (await Promise.all(positionPromises)).filter((p): p is LpPosition => p !== null);
-          foundPositions.push(...newPositions);
-          setPositions([...foundPositions].sort((a, b) => parseFloat(b.totalValueUSD) - parseFloat(a.totalValueUSD)));
-          setTotalPortfolioValue(foundPositions.reduce((sum, pos) => sum + parseFloat(pos.totalValueUSD), 0));
+          if (newPositions.length > 0) {
+            foundPositions.push(...newPositions);
+            const sorted = [...foundPositions].sort((a, b) => parseFloat(b.totalValueUSD) - parseFloat(a.totalValueUSD));
+            setPositions(sorted);
+            setTotalPortfolioValue(sorted.reduce((sum, pos) => sum + parseFloat(pos.totalValueUSD), 0));
+          }
         }
+        const currentProgress: CacheData = {
+          timestamp: Date.now(),
+          data: foundPositions,
+          lastScannedIndex: batchEnd - 1,
+          totalPairCount: pairsToScan,
+        };
+        localStorage.setItem(currentCacheKey, JSON.stringify(currentProgress));
+        setCacheTimestamp(currentProgress.timestamp);
       }
       setTokenSymbolMap(localTokenSymbolMap);
-      const finalPositions = [...foundPositions].sort((a, b) => parseFloat(b.totalValueUSD) - parseFloat(a.totalValueUSD));
-      setPositions(finalPositions);
-      setTotalPortfolioValue(finalPositions.reduce((sum, pos) => sum + parseFloat(pos.totalValueUSD), 0));
       setInfoMessage('Tarama tamamlandı. Arka planda detaylı analiz başlatılıyor...');
-      const cacheData: CacheData = {
-        timestamp: Date.now(),
-        data: finalPositions,
-        lastScannedIndex: pairsToScan - 1,
-        totalPairCount: pairsToScan,
-      };
-      localStorage.setItem(currentCacheKey, JSON.stringify(cacheData));
-      setCacheTimestamp(cacheData.timestamp);
-      setTimeout(() => buildRoutesAndReprice(finalPositions), 100);
+      setTimeout(() => buildRoutesAndReprice(foundPositions), 100);
     } catch (err: any) {
       console.error('Veri yükleme hatası:', err);
       setError(err.message || 'Veri alınırken bir hata oluştu.');
@@ -457,10 +429,10 @@ export default function Home() {
   }, []);
 
   const handleRefresh = useCallback(() => {
-  setFilterTokenAddress('');
-  localStorage.removeItem('tradingGraphCache');
-  fetchLpPositions(true, null);
-}, []);
+    setFilterTokenAddress('');
+    localStorage.removeItem('tradingGraphCache');
+    fetchLpPositions(true, null);
+  }, []);
 
   const handleFilterByToken = useCallback(() => {
     if (!ethers.isAddress(filterTokenAddress)) {

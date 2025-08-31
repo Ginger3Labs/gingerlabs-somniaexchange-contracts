@@ -4,28 +4,22 @@ import clientPromise from '@/lib/mongodb';
 import RouterABI from '@/abis/SomniaExchangeRouter.json';
 import PairABI from '@/abis/SomniaExchangePair.json';
 import ERC20ABI from '@/abis/IERC20.json';
+import { buildTradingGraph, getBestAmountOut, TradingGraph } from '@/lib/pathfinder';
+import { getCachedGraph, setCachedGraph } from '@/lib/cache';
 
 // Gerekli ortam değişkenlerini kontrol et
-if (!process.env.PRIVATE_KEY) {
-    throw new Error('PRIVATE_KEY ortam değişkeni tanımlanmamış.');
-}
-if (!process.env.NEXT_PUBLIC_RPC_URL) {
-    throw new Error('NEXT_PUBLIC_RPC_URL ortam değişkeni tanımlanmamış.');
-}
-if (!process.env.ROUTER_ADDRESS) {
-    throw new Error('ROUTER_ADDRESS ortam değişkeni tanımlanmamış.');
-}
-if (!process.env.MONGODB_DB_NAME) {
-    throw new Error('MONGODB_DB_NAME ortam değişkeni tanımlanmamış.');
-}
+if (!process.env.PRIVATE_KEY) throw new Error('PRIVATE_KEY ortam değişkeni tanımlanmamış.');
+if (!process.env.NEXT_PUBLIC_RPC_URL) throw new Error('NEXT_PUBLIC_RPC_URL ortam değişkeni tanımlanmamış.');
+if (!process.env.ROUTER_ADDRESS) throw new Error('ROUTER_ADDRESS ortam değişkeni tanımlanmamış.');
+if (!process.env.MONGODB_DB_NAME) throw new Error('MONGODB_DB_NAME ortam değişkeni tanımlanmamış.');
+if (!process.env.NEXT_PUBLIC_FACTORY_ADDRESS) throw new Error('NEXT_PUBLIC_FACTORY_ADDRESS ortam değişkeni tanımlanmamış.');
 
 
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL!;
 const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS!;
-// Swap işlemleri için sabit adresler (.env'den okunur)
+const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
 const WSTT_ADDRESS = process.env.NEXT_PUBLIC_WSTT_ADDRESS!;
-const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
 
 
 export async function POST(request: Request) {
@@ -116,49 +110,54 @@ export async function POST(request: Request) {
         const swapResults = [];
         let totalWSTTReceived = 0n;
 
-        const swapTokenToWSTT = async (tokenAddress: string, amount: bigint) => {
+        const getGraph = async (): Promise<TradingGraph> => {
+            let graph = getCachedGraph();
+            if (graph) {
+                return graph;
+            }
+            console.log("Yeni takas grafiği oluşturuluyor...");
+            graph = await buildTradingGraph(FACTORY_ADDRESS, provider, (msg: string) => console.log(`[Pathfinder]: ${msg}`));
+            setCachedGraph(graph);
+            return graph;
+        };
+
+        const swapTokenToWSTT = async (tokenAddress: string, amount: bigint, graph: TradingGraph) => {
             if (amount === 0n) return null;
             if (tokenAddress.toLowerCase() === WSTT_ADDRESS.toLowerCase()) {
                 totalWSTTReceived += amount;
                 return { skipped: true, amount: ethers.formatUnits(amount, 18) };
             }
 
-            console.log(`${tokenAddress} WSTT'ye çevriliyor...`);
+            console.log(`${tokenAddress} için en iyi WSTT rotası aranıyor...`);
             const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, wallet);
 
-            // En iyi rotayı bul
-            const directPath = [tokenAddress, WSTT_ADDRESS];
-            const usdcPath = [tokenAddress, USDC_ADDRESS, WSTT_ADDRESS];
-            let bestPath = directPath;
-            let bestAmountOut = 0n;
+            const { amount: bestAmountOut, path: bestPath } = await getBestAmountOut(
+                tokenAddress, WSTT_ADDRESS, amount, graph, ROUTER_ADDRESS, provider
+            );
 
-            try {
-                const directAmountsOut = await routerContract.getAmountsOut(amount, directPath);
-                bestAmountOut = directAmountsOut[directAmountsOut.length - 1];
-            } catch (e) { /* Rota yoksa devam et */ }
-
-            try {
-                const usdcAmountsOut = await routerContract.getAmountsOut(amount, usdcPath);
-                const usdcAmountOut = usdcAmountsOut[usdcAmountsOut.length - 1];
-                if (usdcAmountOut > bestAmountOut) {
-                    bestAmountOut = usdcAmountOut;
-                    bestPath = usdcPath;
-                }
-            } catch (e) { /* Rota yoksa devam et */ }
-
-            if (bestAmountOut === 0n) {
+            if (bestAmountOut === 0n || bestPath.length === 0) {
                 console.log(`${tokenAddress} için WSTT'ye giden bir rota bulunamadı.`);
-                return { error: "Rota bulunamadı" };
+                // Hata fırlatmak yerine, bu token'ı atlayıp log'a not düşebiliriz.
+                // Bu, bir token takas edilemese bile diğerinin edilmesine olanak tanır.
+                return { error: "Akıllı rota bulunamadı", amountIn: ethers.formatUnits(amount, await tokenContract.decimals()) };
             }
-            console.log(`En iyi rota: ${bestPath.join(' -> ')} | Beklenen WSTT: ${ethers.formatUnits(bestAmountOut, 18)}`);
+            console.log(`En iyi rota bulundu: ${bestPath.join(' -> ')} | Beklenen WSTT: ${ethers.formatUnits(bestAmountOut, 18)}`);
 
             // Onay ve Swap
             const approveTx = await tokenContract.approve(ROUTER_ADDRESS, amount);
             await approveTx.wait();
+
             const swapTx = await routerContract.swapExactTokensForTokens(
-                amount, 0, bestPath, wallet.address, Math.floor(Date.now() / 1000) + 60 * 20
+                amount,
+                0, // Slippage'ı şimdilik 0 kabul ediyoruz, daha sonra ayarlanabilir.
+                bestPath,
+                wallet.address,
+                Math.floor(Date.now() / 1000) + 60 * 20
             );
-            const swapReceipt = await swapTx.wait();
+            await swapTx.wait();
+
+            // Gerçekte ne kadar WSTT alındığını kontrol etmek daha doğru olur,
+            // ama şimdilik getAmountsOut'a güveniyoruz.
             totalWSTTReceived += bestAmountOut;
 
             return {
@@ -169,12 +168,14 @@ export async function POST(request: Request) {
             };
         };
 
+        const tradingGraph = await getGraph();
+
         if (receivedToken0Amount > 0n) {
-            const result = await swapTokenToWSTT(token0Address, receivedToken0Amount);
+            const result = await swapTokenToWSTT(token0Address, receivedToken0Amount, tradingGraph);
             swapResults.push({ token: token0Address, ...result });
         }
         if (receivedToken1Amount > 0n) {
-            const result = await swapTokenToWSTT(token1Address, receivedToken1Amount);
+            const result = await swapTokenToWSTT(token1Address, receivedToken1Amount, tradingGraph);
             swapResults.push({ token: token1Address, ...result });
         }
 
