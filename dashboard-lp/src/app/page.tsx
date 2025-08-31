@@ -19,6 +19,12 @@ interface LpPosition {
   totalValueUSD: string;
 }
 
+interface TrackedTokenBalance {
+  address: string;
+  symbol: string;
+  balance: string;
+}
+
 interface CacheData {
   timestamp: number;
   data: LpPosition[];
@@ -62,6 +68,7 @@ export default function Home() {
     return cached ? new Map(JSON.parse(cached)) : new Map();
   });
   const [refreshingPosition, setRefreshingPosition] = useState<string | null>(null);
+  const [trackedBalances, setTrackedBalances] = useState<TrackedTokenBalance[]>([]);
 
   useEffect(() => {
     // tokenSymbolMap her değiştiğinde localStorage'a kaydet
@@ -423,12 +430,43 @@ export default function Home() {
     }
   }, [WALLET_TO_CHECK, RPC_URL, ROUTER_ADDRESS, FACTORY_ADDRESS, WSTT_ADDRESS]);
 
+  const fetchTrackedBalances = useCallback(async () => {
+    const trackedTokensEnv = process.env.NEXT_PUBLIC_TRACKED_TOKEN_ADDRESSES || '';
+    if (!trackedTokensEnv || !WALLET_TO_CHECK) {
+      return;
+    }
+
+    const tokenAddresses = trackedTokensEnv.split(',').map(addr => addr.trim());
+
+    try {
+      const balancePromises = tokenAddresses.map(async (address) => {
+        const tokenContract = new ethers.Contract(address, ERC20ABI.abi, provider);
+        const [balance, decimals, symbol] = await Promise.all([
+          tokenContract.balanceOf(WALLET_TO_CHECK),
+          tokenContract.decimals(),
+          tokenContract.symbol()
+        ]);
+        return {
+          address,
+          symbol,
+          balance: ethers.formatUnits(balance, decimals),
+        };
+      });
+
+      const balances = await Promise.all(balancePromises);
+      setTrackedBalances(balances);
+    } catch (error) {
+      console.error("Takip edilen token bakiyeleri alınamadı:", error);
+    }
+  }, [provider, WALLET_TO_CHECK]);
+
   useEffect(() => {
     const walletAddress = process.env.NEXT_PUBLIC_WALLET_ADDRESS;
     if (walletAddress) {
       fetchLpPositions(false, null);
+      fetchTrackedBalances();
     }
-  }, []);
+  }, [fetchTrackedBalances]);
 
   const handleRefresh = useCallback(() => {
     setFilterTokenAddress('');
@@ -701,6 +739,19 @@ export default function Home() {
                   <div className="flex items-center gap-2">
                     <span className="text-gray-400">Son Güncelleme:</span>
                     <span className="text-sm text-gray-300">{new Date(cacheTimestamp).toLocaleString()}</span>
+                  </div>
+                )}
+                {trackedBalances.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-gray-700/50">
+                    <h3 className="text-lg font-semibold mb-2 text-gray-300">Takip Edilen Varlıklar</h3>
+                    <div className="space-y-2">
+                      {trackedBalances.map(token => (
+                        <div key={token.address} className="flex justify-between items-center bg-gray-700/30 px-3 py-2 rounded-md">
+                          <span className="font-bold text-white">{token.symbol}</span>
+                          <span className="font-mono text-green-400">{formatToDecimals(parseFloat(token.balance))}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

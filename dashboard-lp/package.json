@@ -6,14 +6,16 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "backup": "node -r dotenv/config scripts/saveTotalAssets.js"
   },
   "dependencies": {
     "ethers": "^6.15.0",
     "mongodb": "^6.19.0",
     "next": "15.5.2",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "dotenv": "^16.6.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
