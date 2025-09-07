@@ -35,7 +35,8 @@ if (!MONGODB_URI || !MONGODB_DB_NAME || !RPC_URL || !TARGET_TOKEN_ADDRESS || !FA
     throw new Error('One or more environment variables are not set. Please check your .env file.');
 }
 
-const provider = new ethers.JsonRpcProvider(RPC_URL);
+const rpcUrl = new URL(RPC_URL!);
+const provider = new ethers.JsonRpcProvider(rpcUrl.href);
 const routerContract = new ethers.Contract(ROUTER_ADDRESS!, RouterABI.abi, provider);
 
 // --- Helper Functions ---

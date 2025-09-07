@@ -24,7 +24,11 @@ export default function Home() {
 
 
   // Provider setup
-  const provider = useMemo(() => new ethers.JsonRpcProvider(RPC_URL), [RPC_URL]);
+  const provider = useMemo(() => {
+    const rpcUrl = new URL(RPC_URL);
+    // The href property contains the full URL including any query parameters like an API key.
+    return new ethers.JsonRpcProvider(rpcUrl.href);
+  }, [RPC_URL]);
 
   // State
   const [walletToCheck, setWalletToCheck] = useState<string>('');

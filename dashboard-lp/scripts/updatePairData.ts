@@ -27,7 +27,8 @@ const PRICE_PRECISION = 18;
 
 async function main() {
     console.log('Connecting to provider and fetching feeTo address...');
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const rpcUrl = new URL(RPC_URL);
+    const provider = new ethers.JsonRpcProvider(rpcUrl.href);
     const factoryContract = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
     const WALLET_TO_CHECK = await factoryContract.feeTo();
 

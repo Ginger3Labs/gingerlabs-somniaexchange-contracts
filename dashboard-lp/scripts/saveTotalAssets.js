@@ -117,7 +117,8 @@ async function main() {
     }
 
     const mongoClient = new MongoClient(MONGO_URI);
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const rpcUrl = new URL(RPC_URL);
+    const provider = new ethers.JsonRpcProvider(rpcUrl.href);
 
     try {
         // MongoDB'ye Bağlan
