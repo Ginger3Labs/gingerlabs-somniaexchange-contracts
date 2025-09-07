@@ -39,8 +39,10 @@ export function useLPPositions({ walletAddress }: UseLPPositionsProps) {
             }
 
             const { data, totalValue, timestamp } = await response.json();
+            // positions totalValueUSD 0.05 den kücükleri getirme
+            const filteredPositions = data.filter((pos: LpPosition) => parseFloat(pos.totalValueUSD) >= 0.05);
 
-            setPositions(data || []);
+            setPositions(filteredPositions || []);
             setTotalPortfolioValue(totalValue || 0);
             setCacheTimestamp(timestamp || null);
             setInfoMessage(`${(data || []).length} pozisyon bulundu.`);
