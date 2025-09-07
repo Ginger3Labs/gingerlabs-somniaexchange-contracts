@@ -22,12 +22,12 @@ const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS!;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
 
 export async function POST(request: NextRequest) {
-    try {
-        await rateLimiter.checkWithdraw(request);
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    } catch (_error) {
-        return NextResponse.json({ success: false, message: 'Too many withdraw attempts. Please try again later.' }, { status: 429 });
-    }
+    // try {
+    //     await rateLimiter.checkWithdraw(request);
+    //     // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    // } catch (_error) {
+    //     return NextResponse.json({ success: false, message: 'Too many withdraw attempts. Please try again later.' }, { status: 429 });
+    // }
 
     const cookie = request.cookies.get('session')?.value;
     const session = await decrypt(cookie);
