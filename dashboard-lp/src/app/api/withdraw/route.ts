@@ -11,14 +11,14 @@ import { rateLimiter } from '@/lib/rate-limiter';
 // Gerekli ortam değişkenlerini kontrol et
 if (!process.env.PRIVATE_KEY) throw new Error('PRIVATE_KEY ortam değişkeni tanımlanmamış.');
 if (!process.env.NEXT_PUBLIC_RPC_URL) throw new Error('NEXT_PUBLIC_RPC_URL ortam değişkeni tanımlanmamış.');
-if (!process.env.ROUTER_ADDRESS) throw new Error('ROUTER_ADDRESS ortam değişkeni tanımlanmamış.');
+if (!process.env.NEXT_PUBLIC_ROUTER_ADDRESS) throw new Error('ROUTER_ADDRESS ortam değişkeni tanımlanmamış.');
 if (!process.env.MONGODB_DB_NAME) throw new Error('MONGODB_DB_NAME ortam değişkeni tanımlanmamış.');
 if (!process.env.NEXT_PUBLIC_FACTORY_ADDRESS) throw new Error('NEXT_PUBLIC_FACTORY_ADDRESS ortam değişkeni tanımlanmamış.');
 
 
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL!;
 const PRIVATE_KEY = process.env.PRIVATE_KEY!;
-const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS!;
+const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS!;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
 
 export async function POST(request: NextRequest) {

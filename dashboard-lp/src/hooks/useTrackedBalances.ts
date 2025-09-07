@@ -10,7 +10,7 @@ export function useTrackedBalances(
     const [trackedBalances, setTrackedBalances] = useState<TrackedTokenBalance[]>([]);
 
     const fetchTrackedBalances = useCallback(async () => {
-        const trackedTokensEnv = process.env.NEXT_PUBLIC_TRACKED_TOKEN_ADDRESSES || '';
+        const trackedTokensEnv = process.env.NEXT_PUBLIC_PRIORITY_TOKENS || '';
         if (!trackedTokensEnv || !walletAddress) return;
 
         const tokenAddresses = trackedTokensEnv.split(',').map(addr => addr.trim());

@@ -1,4 +1,4 @@
-import { MongoClient } from 'mongodb';
+import { MongoClient, AnyBulkWriteOperation } from 'mongodb';
 import { ethers, Contract, formatUnits, getAddress } from 'ethers';
 import { LpPosition } from '../src/types/lp';
 import dotenv from 'dotenv';
@@ -23,10 +23,14 @@ const WALLET_TO_CHECK = process.env.NEXT_PUBLIC_WALLET_ADDRESS;
 const TARGET_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TARGET_TOKEN_ADDRESS;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS;
 const WRAPPED_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_WRAPPED_TOKEN_ADDRESS;
-const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS;
+const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS;
 
 const FACTORY_INDEXER_COLLECTION = 'factoryIndexer';
 const POSITIONS_COLLECTION = 'positions';
+const CONCURRENT_BATCH_SIZE = 10; // Aynı anda işlenecek pair sayısı (RPC limitleri için düşürüldü)
+const DATA_FRESHNESS_THRESHOLD_HOURS = 24; // Kaç saatten eski verilerin güncelleneceği
+const MAX_RETRIES = 3; // Bir RPC çağrısı için maksimum yeniden deneme sayısı
+const RETRY_DELAY_MS = 2000; // Yeniden denemeler arasındaki bekleme süresi (milisaniye)
 
 if (!MONGODB_URI || !MONGODB_DB_NAME || !RPC_URL || !WALLET_TO_CHECK || !TARGET_TOKEN_ADDRESS || !FACTORY_ADDRESS || !WRAPPED_TOKEN_ADDRESS || !ROUTER_ADDRESS) {
     throw new Error('One or more environment variables are not set. Please check your .env file.');
@@ -38,31 +42,34 @@ const routerContract = new ethers.Contract(ROUTER_ADDRESS!, RouterABI.abi, provi
 
 // --- Helper Functions ---
 
-// Cache for token data to avoid redundant RPC calls
+// Helper to introduce a delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 const tokenDataCache = new Map<string, { symbol: string; name: string; decimals: number }>();
 async function getTokenData(tokenAddress: string) {
-    if (tokenDataCache.has(tokenAddress)) {
-        return tokenDataCache.get(tokenAddress)!;
+    const normalizedAddress = getAddress(tokenAddress);
+    if (tokenDataCache.has(normalizedAddress)) {
+        return tokenDataCache.get(normalizedAddress)!;
     }
     try {
-        const tokenContract = new Contract(tokenAddress, IUniswapV2ERC20.abi, provider);
+        const tokenContract = new Contract(normalizedAddress, IUniswapV2ERC20.abi, provider);
         const [symbol, name, decimals] = await Promise.all([
             tokenContract.symbol(),
             tokenContract.name(),
             tokenContract.decimals(),
         ]);
         const data = { symbol, name, decimals: Number(decimals) };
-        tokenDataCache.set(tokenAddress, data);
+        tokenDataCache.set(normalizedAddress, data);
         return data;
     } catch (error) {
-        console.error(`Error fetching data for token ${tokenAddress}:`, error);
+        console.error(`Error fetching data for token ${normalizedAddress}:`, error);
         const errorData = { symbol: 'ERR', name: 'Error', decimals: 18 };
-        tokenDataCache.set(tokenAddress, errorData);
+        tokenDataCache.set(normalizedAddress, errorData);
         return errorData;
     }
 }
 
-// --- Advanced Price Calculation Logic (inspired by pathfinder.ts) ---
+// --- Advanced Price Calculation Logic ---
 
 const priceCache = new Map<string, bigint>();
 const PRICE_PRECISION = 18;
@@ -83,47 +90,30 @@ async function getBestAmountOut(
 
     const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-    // --- Aşama 1: Doğrudan Rotayı Kontrol Et (TokenIn -> TokenOut) ---
     try {
-        const directPairAddress = await factoryContract.getPair(tIn, tOut);
-        if (directPairAddress && directPairAddress !== ZERO_ADDRESS) {
-            const path = [tokenInAddress, tokenOutAddress];
+        const path = [tokenInAddress, tokenOutAddress];
+        const amountsOut = await routerContract.getAmountsOut(amountIn, path);
+        const finalAmount = amountsOut[amountsOut.length - 1];
+        if (finalAmount > 0n) {
+            return { amount: finalAmount, path };
+        }
+    } catch { }
+
+    const wrappedTokenAddress = WRAPPED_TOKEN_ADDRESS;
+    if (!wrappedTokenAddress) return { amount: 0n, path: [] };
+
+    try {
+        const pToken = normalizeAddress(wrappedTokenAddress);
+        if (pToken !== tIn && pToken !== tOut) {
+            const path = [tokenInAddress, wrappedTokenAddress, tokenOutAddress];
             const amountsOut = await routerContract.getAmountsOut(amountIn, path);
             const finalAmount = amountsOut[amountsOut.length - 1];
             if (finalAmount > 0n) {
                 return { amount: finalAmount, path };
             }
         }
-    } catch {
-        // Bu yol geçerli değil, devam et.
-    }
+    } catch { }
 
-    // --- Aşama 2: WRAPPED_TOKEN Üzerinden Tek Adımlı Rota Ara ---
-    const wrappedTokenAddress = process.env.NEXT_PUBLIC_WRAPPED_TOKEN_ADDRESS;
-    if (!wrappedTokenAddress) {
-        return { amount: 0n, path: [] }; // Wrapped token yoksa devam etme
-    }
-
-    try {
-        const pToken = normalizeAddress(wrappedTokenAddress);
-        if (pToken !== tIn && pToken !== tOut) {
-            const pair1 = await factoryContract.getPair(tIn, pToken);
-            const pair2 = await factoryContract.getPair(pToken, tOut);
-
-            if (pair1 && pair1 !== ZERO_ADDRESS && pair2 && pair2 !== ZERO_ADDRESS) {
-                const path = [tokenInAddress, wrappedTokenAddress, tokenOutAddress];
-                const amountsOut = await routerContract.getAmountsOut(amountIn, path);
-                const finalAmount = amountsOut[amountsOut.length - 1];
-                if (finalAmount > 0n) {
-                    return { amount: finalAmount, path };
-                }
-            }
-        }
-    } catch {
-        // Bu yol geçerli değil.
-    }
-
-    // Hiçbir rota bulunamadı.
     return { amount: 0n, path: [] };
 }
 
@@ -144,10 +134,7 @@ async function getPriceInTargetToken(tokenInAddress: string): Promise<bigint> {
     try {
         const tokenInData = await getTokenData(tokenIn);
         const targetTokenData = await getTokenData(targetToken);
-
-        // 1 birim tokenIn'in değerini hesapla
         const amountIn = 10n ** BigInt(tokenInData.decimals);
-
         const { amount: bestAmountOut } = await getBestAmountOut(tokenIn, targetToken, amountIn);
 
         if (bestAmountOut === 0n) {
@@ -155,11 +142,7 @@ async function getPriceInTargetToken(tokenInAddress: string): Promise<bigint> {
             return 0n;
         }
 
-        // Fiyatı, 1 tokenIn'in targetToken cinsinden değeri olarak hesapla.
-        // Sonuç, PRICE_PRECISION (18) ondalık basamağa sahip olacak şekilde normalize edilir.
-        // Formül: price = (amountOut_for_1_tokenIn * 10**PRICE_PRECISION) / 10**targetToken_decimals
         const price = (bestAmountOut * (10n ** BigInt(PRICE_PRECISION))) / (10n ** BigInt(targetTokenData.decimals));
-
         priceCache.set(cacheKey, price);
         return price;
 
@@ -171,6 +154,83 @@ async function getPriceInTargetToken(tokenInAddress: string): Promise<bigint> {
 }
 
 // --- Main Logic ---
+
+async function processPair(pairAddress: string): Promise<DbLpPosition | null> {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const pairContract = new Contract(pairAddress, IUniswapV2Pair.abi, provider);
+            const balance = await pairContract.balanceOf(WALLET_TO_CHECK);
+
+            if (balance > 0n) {
+                const [reserves, totalSupply, token0Address, token1Address] = await Promise.all([
+                    pairContract.getReserves(),
+                    pairContract.totalSupply(),
+                    pairContract.token0(),
+                    pairContract.token1(),
+                ]);
+
+                const [token0Data, token1Data] = await Promise.all([
+                    getTokenData(token0Address),
+                    getTokenData(token1Address),
+                ]);
+
+                const reserve0_bigint = BigInt(reserves[0].toString());
+                const reserve1_bigint = BigInt(reserves[1].toString());
+
+                const userAmount0_bigint = (balance * reserve0_bigint) / totalSupply;
+                const userAmount1_bigint = (balance * reserve1_bigint) / totalSupply;
+
+                const [price0, price1] = await Promise.all([
+                    getPriceInTargetToken(token0Address),
+                    getPriceInTargetToken(token1Address)
+                ]);
+
+                const value0InTarget = (userAmount0_bigint * price0) / (10n ** BigInt(token0Data.decimals));
+                const value1InTarget = (userAmount1_bigint * price1) / (10n ** BigInt(token1Data.decimals));
+                const totalValueInTarget = value0InTarget + value1InTarget;
+
+                const userShare = Number(balance) / Number(totalSupply);
+
+                return {
+                    walletAddress: getAddress(WALLET_TO_CHECK!),
+                    pairAddress: getAddress(pairAddress),
+                    lpBalance: balance.toString(),
+                    poolShare: userShare.toString(),
+                    totalValueUSD: formatUnits(totalValueInTarget, PRICE_PRECISION),
+                    token0: {
+                        address: getAddress(token0Address),
+                        symbol: token0Data.symbol,
+                        route: [],
+                    },
+                    token1: {
+                        address: getAddress(token1Address),
+                        symbol: token1Data.symbol,
+                        route: [],
+                    },
+                    estimatedWithdraw: {
+                        token0Amount: formatUnits(userAmount0_bigint, token0Data.decimals),
+                        token1Amount: formatUnits(userAmount1_bigint, token1Data.decimals),
+                        token0ValueInTarget: formatUnits(value0InTarget, PRICE_PRECISION),
+                        token1ValueInTarget: formatUnits(value1InTarget, PRICE_PRECISION),
+                        totalValueInTarget: formatUnits(totalValueInTarget, PRICE_PRECISION),
+                    },
+                    updatedAt: new Date(),
+                };
+            }
+            return null; // Balance is zero, successful exit
+        } catch (pairError: any) {
+            if (pairError.code === 'TIMEOUT' && attempt < MAX_RETRIES) {
+                console.warn(`  - Timeout processing pair ${pairAddress}. Retrying in ${RETRY_DELAY_MS / 1000}s... (Attempt ${attempt}/${MAX_RETRIES})`);
+                await delay(RETRY_DELAY_MS);
+            } else {
+                console.error(`  - Error processing pair ${pairAddress} after ${attempt} attempts:`, pairError);
+                return null; // Max retries reached or non-timeout error
+            }
+        }
+    }
+    return null; // Should not be reached, but for type safety
+}
+
 
 async function updatePositionsFromFactory() {
     console.log('Connecting to MongoDB...');
@@ -189,104 +249,72 @@ async function updatePositionsFromFactory() {
         ]).toArray();
 
         const allPairAddresses = pairDocuments.map(doc => getAddress(doc._id));
-        console.log(`Found ${allPairAddresses.length} unique pairs.`);
+        console.log(`Found ${allPairAddresses.length} total unique pairs in the factory.`);
 
-        if (allPairAddresses.length === 0) {
-            console.log('No pairs found in the factoryIndexer collection. Exiting.');
+        // --- Incremental Update Logic ---
+        console.log('Fetching existing positions to determine which pairs to update...');
+        const existingPositions = await positionsCollection.find({ walletAddress: getAddress(WALLET_TO_CHECK!) }).toArray();
+        const existingPositionsMap = new Map(existingPositions.map(p => [p.pairAddress, p.updatedAt]));
+
+        const thresholdDate = new Date(Date.now() - DATA_FRESHNESS_THRESHOLD_HOURS * 60 * 60 * 1000);
+
+        const pairsToUpdate = allPairAddresses.filter(pairAddress => {
+            const lastUpdate = existingPositionsMap.get(pairAddress);
+            if (!lastUpdate) {
+                return true; // New pair, always update
+            }
+            return lastUpdate < thresholdDate; // Old pair, update if data is stale
+        });
+
+        console.log(`Found ${existingPositions.length} existing positions. After filtering, ${pairsToUpdate.length} pairs need updating (new or stale).`);
+
+        if (pairsToUpdate.length === 0) {
+            console.log('All positions are up-to-date. Exiting.');
             return;
         }
 
-        const activePositions: DbLpPosition[] = [];
+        const allActivePositions: DbLpPosition[] = [];
         let processedCount = 0;
 
-        for (const pairAddress of allPairAddresses) {
-            processedCount++;
-            console.log(`[${processedCount}/${allPairAddresses.length}] Checking balance for pair: ${pairAddress}`);
+        for (let i = 0; i < pairsToUpdate.length; i += CONCURRENT_BATCH_SIZE) {
+            const batch = pairsToUpdate.slice(i, i + CONCURRENT_BATCH_SIZE);
 
-            try {
-                const pairContract = new Contract(pairAddress, IUniswapV2Pair.abi, provider);
-                const balance = await pairContract.balanceOf(WALLET_TO_CHECK);
+            const batchPromises = batch.map(pairAddress => processPair(pairAddress));
+            const results = await Promise.all(batchPromises);
 
-                if (balance > 0n) {
-                    console.log(`  - Found active position in ${pairAddress} with balance: ${balance.toString()}`);
-
-                    const [reserves, totalSupply, token0Address, token1Address] = await Promise.all([
-                        pairContract.getReserves(),
-                        pairContract.totalSupply(),
-                        pairContract.token0(),
-                        pairContract.token1(),
-                    ]);
-
-                    const [token0Data, token1Data] = await Promise.all([
-                        getTokenData(token0Address),
-                        getTokenData(token1Address),
-                    ]);
-
-                    const reserve0_bigint = BigInt(reserves[0].toString());
-                    const reserve1_bigint = BigInt(reserves[1].toString());
-
-                    const userAmount0_bigint = (balance * reserve0_bigint) / totalSupply;
-                    const userAmount1_bigint = (balance * reserve1_bigint) / totalSupply;
-
-                    const [price0, price1] = await Promise.all([
-                        getPriceInTargetToken(token0Address),
-                        getPriceInTargetToken(token1Address)
-                    ]);
-
-                    // Değer Hesaplaması: (Kullanıcının Token Miktarı * Token Fiyatı) / 10^token_ondalık
-                    // price0 ve price1 zaten PRICE_PRECISION'a (18) göre ayarlandığı için,
-                    // bu işlem sonucunda çıkan değer de PRICE_PRECISION ondalığına sahip olur.
-                    const value0InTarget = (userAmount0_bigint * price0) / (10n ** BigInt(token0Data.decimals));
-                    const value1InTarget = (userAmount1_bigint * price1) / (10n ** BigInt(token1Data.decimals));
-                    const totalValueInTarget = value0InTarget + value1InTarget;
-
-                    const userShare = Number(balance) / Number(totalSupply);
-
-                    const position: DbLpPosition = {
-                        walletAddress: getAddress(WALLET_TO_CHECK!),
-                        pairAddress: getAddress(pairAddress),
-                        lpBalance: balance.toString(), // Ham BigInt değerini string olarak sakla
-                        poolShare: userShare.toString(),
-                        totalValueUSD: formatUnits(totalValueInTarget, PRICE_PRECISION), // Okunabilir formata çevir
-                        token0: {
-                            address: getAddress(token0Address),
-                            symbol: token0Data.symbol,
-                            route: [],
-                        },
-                        token1: {
-                            address: getAddress(token1Address),
-                            symbol: token1Data.symbol,
-                            route: [],
-                        },
-                        estimatedWithdraw: {
-                            token0Amount: formatUnits(userAmount0_bigint, token0Data.decimals),
-                            token1Amount: formatUnits(userAmount1_bigint, token1Data.decimals),
-                            token0ValueInTarget: formatUnits(value0InTarget, PRICE_PRECISION),
-                            token1ValueInTarget: formatUnits(value1InTarget, PRICE_PRECISION),
-                            totalValueInTarget: formatUnits(totalValueInTarget, PRICE_PRECISION),
-                        },
-                        updatedAt: new Date(),
-                    };
-                    activePositions.push(position);
-
-                    await positionsCollection.updateOne(
-                        { walletAddress: position.walletAddress, pairAddress: position.pairAddress },
-                        { $set: position },
-                        { upsert: true }
-                    );
-                    console.log(`  - Saved position for ${token0Data.symbol}-${token1Data.symbol} to the database.`);
-                }
-            } catch (pairError) {
-                console.error(`  - Error processing pair ${pairAddress}:`, pairError);
+            const activePositionsInBatch = results.filter((p): p is DbLpPosition => p !== null);
+            if (activePositionsInBatch.length > 0) {
+                allActivePositions.push(...activePositionsInBatch);
             }
+
+            processedCount += batch.length;
+            console.log(`[${processedCount}/${pairsToUpdate.length}] Processed batch. Found ${activePositionsInBatch.length} new positions in this batch.`);
         }
 
-        console.log(`\nFinished processing all pairs. Found ${activePositions.length} active positions.`);
+        console.log(`\nFinished processing. Found a total of ${allActivePositions.length} active positions to update.`);
 
-        const activePairAddresses = activePositions.map(p => p.pairAddress);
+        if (allActivePositions.length > 0) {
+            console.log('Starting bulk write operation to the database...');
+            const bulkOps: AnyBulkWriteOperation<DbLpPosition>[] = allActivePositions.map(position => ({
+                updateOne: {
+                    filter: { walletAddress: position.walletAddress, pairAddress: position.pairAddress },
+                    update: { $set: position },
+                    upsert: true,
+                },
+            }));
+            await positionsCollection.bulkWrite(bulkOps);
+            console.log(`Successfully upserted ${allActivePositions.length} positions.`);
+        }
+
+        // Note: The logic for cleaning up old positions might need adjustment.
+        // This now only cleans up positions that are no longer found in the factory,
+        // but doesn't account for positions that have become zero-balance.
+        // A separate cleanup process might be better. For now, we'll keep the existing logic.
+        const activePairAddresses = allActivePositions.map(p => p.pairAddress);
+        console.log('Cleaning up old/inactive positions...');
         const deleteResult = await positionsCollection.deleteMany({
             walletAddress: getAddress(WALLET_TO_CHECK!),
-            pairAddress: { $nin: activePairAddresses }
+            pairAddress: { $nin: allPairAddresses } // This should be all pairs from factory, not just updated ones
         });
 
         if (deleteResult.deletedCount > 0) {

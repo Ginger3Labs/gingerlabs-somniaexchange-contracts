@@ -12,7 +12,7 @@ export function useWithdraw({ onSuccess, targetTokenAddress, walletAddress }: Us
     const [txStatus, setTxStatus] = useState<{ [pairAddress: string]: string }>({});
     const [txError, setTxError] = useState<string | null>(null);
 
-    const handleWithdraw = useCallback(async (position: LpPosition, percentage: number) => {
+    const handleWithdraw = useCallback(async (position: LpPosition, percentage: number, options?: { skipCallbacks?: boolean }) => {
         if (percentage <= 0 || percentage > 100) {
             setTxError("Geçersiz yüzde değeri.");
             return;
@@ -33,22 +33,23 @@ export function useWithdraw({ onSuccess, targetTokenAddress, walletAddress }: Us
 
             setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'success' }));
 
-            // Update the single position right after successful withdrawal
-            try {
-                await fetch('/api/positions/update-single', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        pairAddress: position.pairAddress,
-                        walletAddress: walletAddress,
-                    }),
-                });
-            } catch (updateError) {
-                console.error("Failed to update single position after withdraw:", updateError);
-                // Don't block the UI flow, just log the error. The full refresh will fix it.
+            if (!options?.skipCallbacks) {
+                // Update the single position right after successful withdrawal
+                try {
+                    await fetch('/api/positions/update-single', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            pairAddress: position.pairAddress,
+                            walletAddress: walletAddress,
+                        }),
+                    });
+                } catch (updateError) {
+                    console.error("Failed to update single position after withdraw:", updateError);
+                    // Don't block the UI flow, just log the error. The full refresh will fix it.
+                }
+                onSuccess();
             }
-
-            onSuccess();
 
             setTimeout(() => {
                 setTxStatus(prev => ({ ...prev, [position.pairAddress]: 'idle' }));

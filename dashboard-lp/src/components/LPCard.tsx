@@ -8,6 +8,8 @@ interface LPCardProps {
     targetTokenSymbol: string;
     onWithdraw: (position: LpPosition, percentage: number) => void;
     isWithdrawing: boolean;
+    isSelected: boolean;
+    onSelectionChange: (pairAddress: string) => void;
 }
 
 export function LPCard({
@@ -15,6 +17,8 @@ export function LPCard({
     targetTokenSymbol,
     onWithdraw,
     isWithdrawing,
+    isSelected,
+    onSelectionChange,
 }: LPCardProps) {
     const [withdrawPercentage, setWithdrawPercentage] = useState(100);
 
@@ -43,7 +47,13 @@ export function LPCard({
                                 {`${position.pairAddress.slice(0, 6)}...${position.pairAddress.slice(-4)}`}
                             </p>
                         </div>
-                        <div className="text-right">
+                        <div className="text-right flex items-start gap-2">
+                            <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => onSelectionChange(position.pairAddress)}
+                                className="form-checkbox h-6 w-6 bg-gray-700 border-gray-600 rounded text-blue-500 focus:ring-blue-500/50 cursor-pointer mt-1"
+                            />
                             <div className="bg-green-500/10 border border-green-500/20 rounded-xl px-4 py-2">
                                 <span className="block text-2xl font-bold text-green-400">
                                     {formatToDecimals(Number(position.totalValueUSD))}
