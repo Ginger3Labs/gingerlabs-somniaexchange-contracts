@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "backup": "node -r dotenv/config scripts/saveTotalAssets.js"
+    "backup": "node -r dotenv/config scripts/saveTotalAssets.js",
+    "update-pairs": "ts-node -P tsconfig.scripts.json -r tsconfig-paths/register -r dotenv/config scripts/updatePairData.ts",
+    "calculate-positions": "ts-node --transpile-only -P tsconfig.scripts.json -r tsconfig-paths/register -r dotenv/config scripts/calculatePositions.ts"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
@@ -28,6 +30,8 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.2",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0"
   }
 }

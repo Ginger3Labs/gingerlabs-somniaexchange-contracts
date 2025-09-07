@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ethers } from 'ethers';
-import clientPromise from '@/lib/mongodb';
+import { clientPromise } from '@/lib/mongodb';
 import RouterABI from '@/abis/SomniaExchangeRouter.json';
 import PairABI from '@/abis/SomniaExchangePair.json';
 import ERC20ABI from '@/abis/IERC20.json';
@@ -24,7 +24,7 @@ const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
 export async function POST(request: NextRequest) {
     try {
         await rateLimiter.checkWithdraw(request);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (_error) {
         return NextResponse.json({ success: false, message: 'Too many withdraw attempts. Please try again later.' }, { status: 429 });
     }
