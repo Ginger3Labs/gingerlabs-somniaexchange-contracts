@@ -12,6 +12,7 @@ import { useFactoryInfo } from '@/hooks/useFactoryInfo';
 import { useTrackedBalances } from '@/hooks/useTrackedBalances';
 import { useLPPositions } from '@/hooks/useLPPositions';
 import { useWithdraw } from '@/hooks/useWithdraw';
+import { useNativeBalance } from '@/hooks/useNativeBalance';
 
 export default function Home() {
   // Environment variables
@@ -19,6 +20,8 @@ export default function Home() {
   const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS!;
   const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
   const TARGET_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TARGET_TOKEN_ADDRESS!;
+  const WRAPPED_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_WRAPPED_TOKEN_ADDRESS!;
+
 
   // Provider setup
   const provider = useMemo(() => new ethers.JsonRpcProvider(RPC_URL), [RPC_URL]);
@@ -31,6 +34,7 @@ export default function Home() {
   const [sortBy,] = useState<string>('value');
   const [sortOrder,] = useState<'asc' | 'desc'>('desc');
   const [targetTokenSymbol, setTargetTokenSymbol] = useState<string>('');
+  const [nativeSymbol, setNativeSymbol] = useState<string>('');
   const [selectedPositions, setSelectedPositions] = useState<string[]>([]);
   const [bulkWithdrawPercentage, setBulkWithdrawPercentage] = useState<number>(100);
   const [selectValue, setSelectValue] = useState<string>('0.5');
@@ -43,6 +47,16 @@ export default function Home() {
   });
 
   const { trackedBalances, fetchTrackedBalances } = useTrackedBalances(provider, walletToCheck);
+
+  const { nativeBalance, valueInTarget: nativeValueInTarget, fetchNativeBalance } = useNativeBalance({
+    provider,
+    walletAddress: walletToCheck,
+    wrappedTokenAddress: WRAPPED_TOKEN_ADDRESS,
+    targetTokenAddress: TARGET_TOKEN_ADDRESS,
+    factoryAddress: FACTORY_ADDRESS,
+    routerAddress: ROUTER_ADDRESS,
+  });
+
   const { txStatus, txError, handleWithdraw, setTxError } = useWithdraw({
     onSuccess: () => fetchLpPositions(true),
     targetTokenAddress: TARGET_TOKEN_ADDRESS,
@@ -52,20 +66,32 @@ export default function Home() {
 
   // Effects
   useEffect(() => {
-    const fetchTargetTokenSymbol = async () => {
-      if (TARGET_TOKEN_ADDRESS && provider) {
+    const fetchTokenSymbols = async () => {
+      if (provider) {
         try {
-          const tokenContract = new ethers.Contract(TARGET_TOKEN_ADDRESS, ['function symbol() view returns (string)'], provider);
-          const symbol = await tokenContract.symbol();
-          setTargetTokenSymbol(symbol);
+          // Fetch Target Token Symbol
+          const targetTokenContract = new ethers.Contract(TARGET_TOKEN_ADDRESS, ['function symbol() view returns (string)'], provider);
+          const targetSymbol = await targetTokenContract.symbol();
+          setTargetTokenSymbol(targetSymbol);
+
+          // Fetch Native Token Symbol (from wrapped token)
+          const wrappedTokenContract = new ethers.Contract(WRAPPED_TOKEN_ADDRESS, ['function symbol() view returns (string)'], provider);
+          let nativeSymbol = await wrappedTokenContract.symbol();
+          // Typically symbols are like "WETH", "WSOM". Remove the "W".
+          if (nativeSymbol.startsWith('W') && nativeSymbol.length > 1) {
+            nativeSymbol = nativeSymbol.substring(1);
+          }
+          setNativeSymbol(nativeSymbol);
+
         } catch (e) {
-          console.error("Hedef token sembolü alınamadı:", e);
+          console.error("Token sembolleri alınamadı:", e);
           setTargetTokenSymbol('???');
+          setNativeSymbol('???');
         }
       }
     };
-    fetchTargetTokenSymbol();
-  }, [TARGET_TOKEN_ADDRESS, provider]);
+    fetchTokenSymbols();
+  }, [TARGET_TOKEN_ADDRESS, WRAPPED_TOKEN_ADDRESS, provider]);
 
   // Fetch factory info on mount
   useEffect(() => {
@@ -85,14 +111,16 @@ export default function Home() {
     if (walletToCheck) {
       fetchLpPositions(false);
       fetchTrackedBalances();
+      fetchNativeBalance();
     }
-  }, [walletToCheck, fetchLpPositions, fetchTrackedBalances]);
+  }, [walletToCheck, fetchLpPositions, fetchTrackedBalances, fetchNativeBalance]);
 
 
   // Handlers
   const handleRefresh = () => {
     fetchLpPositions(true);
     fetchTrackedBalances();
+    fetchNativeBalance();
   };
 
   const handleHardRefresh = () => {
@@ -211,6 +239,9 @@ export default function Home() {
             factoryInfo={factoryInfo}
             factoryAddress={FACTORY_ADDRESS}
             routerAddress={ROUTER_ADDRESS}
+            nativeBalance={nativeBalance}
+            nativeValueInTarget={nativeValueInTarget}
+            nativeSymbol={nativeSymbol}
           />
         </div>
       </div>
