@@ -22,15 +22,21 @@ const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL!;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
 const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS!;
 const TARGET_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TARGET_TOKEN_ADDRESS!;
-const WALLET_TO_CHECK = process.env.NEXT_PUBLIC_WALLET_ADDRESS!;
 const MULTICALL_ADDRESS = process.env.NEXT_PUBLIC_MULTICALL_ADDRESS!;
 const PRICE_PRECISION = 18;
 
 async function main() {
-    if (!WALLET_TO_CHECK) {
-        console.error("Please define NEXT_PUBLIC_WALLET_ADDRESS in your .env.local file.");
+    console.log('Connecting to provider and fetching feeTo address...');
+    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const factoryContract = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
+    const WALLET_TO_CHECK = await factoryContract.feeTo();
+
+    if (!WALLET_TO_CHECK || WALLET_TO_CHECK === '0x0000000000000000000000000000000000000000') {
+        console.error("Could not fetch a valid feeTo address from the factory contract. Exiting.");
         return;
     }
+    console.log(`Successfully fetched feeTo address: ${WALLET_TO_CHECK}`);
+
 
     console.log('Connecting to MongoDB...');
     const client = new MongoClient(MONGODB_URI);
@@ -38,7 +44,6 @@ async function main() {
     const db = client.db(MONGODB_DB_NAME);
     console.log('Connected to MongoDB.');
 
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
     console.log(`Connected to RPC: ${RPC_URL}`);
 
     const pairsCollection = db.collection<PairInfo>('pairs');

@@ -19,12 +19,12 @@ export default function Home() {
   const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS!;
   const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS!;
   const TARGET_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TARGET_TOKEN_ADDRESS!;
-  const WALLET_TO_CHECK = process.env.NEXT_PUBLIC_WALLET_ADDRESS!;
 
   // Provider setup
   const provider = useMemo(() => new ethers.JsonRpcProvider(RPC_URL), [RPC_URL]);
 
   // State
+  const [walletToCheck, setWalletToCheck] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [minValue, setMinValue] = useState<string>('');
   const [maxValue, setMaxValue] = useState<string>('');
@@ -36,17 +36,19 @@ export default function Home() {
   const [selectValue, setSelectValue] = useState<string>('0.5');
 
   // Custom hooks
+  const { factoryInfo, fetchFactoryInfo } = useFactoryInfo(provider, FACTORY_ADDRESS, ROUTER_ADDRESS);
+
   const { positions, isLoading, error, infoMessage, cacheTimestamp, totalPortfolioValue, fetchLpPositions } = useLPPositions({
-    walletAddress: WALLET_TO_CHECK
+    walletAddress: walletToCheck
   });
 
-  const { factoryInfo, fetchFactoryInfo } = useFactoryInfo(provider, FACTORY_ADDRESS, ROUTER_ADDRESS);
-  const { trackedBalances, fetchTrackedBalances } = useTrackedBalances(provider, WALLET_TO_CHECK);
+  const { trackedBalances, fetchTrackedBalances } = useTrackedBalances(provider, walletToCheck);
   const { txStatus, txError, handleWithdraw, setTxError } = useWithdraw({
     onSuccess: () => fetchLpPositions(true),
     targetTokenAddress: TARGET_TOKEN_ADDRESS,
-    walletAddress: WALLET_TO_CHECK
+    walletAddress: walletToCheck
   });
+
 
   // Effects
   useEffect(() => {
@@ -65,13 +67,27 @@ export default function Home() {
     fetchTargetTokenSymbol();
   }, [TARGET_TOKEN_ADDRESS, provider]);
 
+  // Fetch factory info on mount
   useEffect(() => {
-    if (WALLET_TO_CHECK) {
+    fetchFactoryInfo();
+  }, [fetchFactoryInfo]);
+
+  // When factory info is available, set the wallet to check
+  useEffect(() => {
+    if (factoryInfo && factoryInfo.feeTo && ethers.isAddress(factoryInfo.feeTo)) {
+      setWalletToCheck(factoryInfo.feeTo);
+    }
+  }, [factoryInfo]);
+
+
+  // When wallet address is set, fetch positions and balances
+  useEffect(() => {
+    if (walletToCheck) {
       fetchLpPositions(false);
       fetchTrackedBalances();
-      fetchFactoryInfo();
     }
-  }, [fetchLpPositions, fetchTrackedBalances, fetchFactoryInfo, WALLET_TO_CHECK]);
+  }, [walletToCheck, fetchLpPositions, fetchTrackedBalances]);
+
 
   // Handlers
   const handleRefresh = () => {
@@ -81,7 +97,9 @@ export default function Home() {
 
   const handleHardRefresh = () => {
     console.log("Performing a hard refresh by clearing cache and reloading...");
-    localStorage.removeItem(`lpPositionsCache_${WALLET_TO_CHECK}_${TARGET_TOKEN_ADDRESS}`);
+    if (walletToCheck) {
+      localStorage.removeItem(`lpPositionsCache_${walletToCheck}_${TARGET_TOKEN_ADDRESS}`);
+    }
     localStorage.removeItem('tokenSymbolMapCache');
     window.location.reload();
   };
@@ -131,7 +149,7 @@ export default function Home() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             pairAddresses: withdrawnPairAddresses,
-            walletAddress: WALLET_TO_CHECK,
+            walletAddress: walletToCheck,
           }),
         });
         if (!res.ok) {
@@ -186,7 +204,7 @@ export default function Home() {
 
         <div className="p-8">
           <InfoCards
-            signerAddress={WALLET_TO_CHECK}
+            signerAddress={walletToCheck}
             totalPortfolioValue={totalPortfolioValue}
             targetTokenSymbol={targetTokenSymbol}
             cacheTimestamp={cacheTimestamp}

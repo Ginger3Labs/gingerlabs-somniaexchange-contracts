@@ -11,7 +11,6 @@ const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL;
 const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS;
 const TARGET_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TARGET_TOKEN_ADDRESS;
-const WALLET_TO_CHECK = process.env.NEXT_PUBLIC_WALLET_ADDRESS;
 const NEXT_PUBLIC_TRACKED_TOKEN_ADDRESSES = process.env.NEXT_PUBLIC_TRACKED_TOKEN_ADDRESSES || '';
 
 // --- pathfinder.ts'den kopyalanan ve uyarlanan fonksiyon ---
@@ -70,7 +69,7 @@ async function getBestAmountOut(
     return { amount: 0n, path: [] };
 }
 
-async function saveTrackedTokenBalances(db, provider) {
+async function saveTrackedTokenBalances(db, provider, walletToCheck) {
     if (!NEXT_PUBLIC_TRACKED_TOKEN_ADDRESSES) {
         console.log('No tracked token addresses found in .env, skipping balance check.');
         return;
@@ -83,7 +82,7 @@ async function saveTrackedTokenBalances(db, provider) {
         try {
             const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI.abi, provider);
             const [balance, decimals, symbol] = await Promise.all([
-                tokenContract.balanceOf(WALLET_TO_CHECK),
+                tokenContract.balanceOf(walletToCheck),
                 tokenContract.decimals(),
                 tokenContract.symbol()
             ]);
@@ -112,8 +111,8 @@ async function saveTrackedTokenBalances(db, provider) {
 
 async function main() {
     console.log('Starting backup process...');
-    if (!MONGO_URI || !MONGO_DB_NAME || !RPC_URL || !WALLET_TO_CHECK) {
-        console.error("Error: Missing required environment variables.");
+    if (!MONGO_URI || !MONGO_DB_NAME || !RPC_URL) {
+        console.error("Error: Missing required environment variables (MONGO_URI, MONGO_DB_NAME, RPC_URL).");
         process.exit(1);
     }
 
@@ -125,13 +124,21 @@ async function main() {
         await mongoClient.connect();
         console.log('Successfully connected to MongoDB.');
         const db = mongoClient.db(MONGO_DB_NAME);
+        
+        // Factory'den feeTo adresini al
+        const factory = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
+        const WALLET_TO_CHECK = await factory.feeTo();
+        if (!WALLET_TO_CHECK || WALLET_TO_CHECK === '0x0000000000000000000000000000000000000000') {
+            throw new Error("Could not fetch a valid feeTo address from the factory contract.");
+        }
+        console.log(`Using feeTo address from factory: ${WALLET_TO_CHECK}`);
+
 
         // 1. Takip edilen token bakiyelerini kaydet
-        await saveTrackedTokenBalances(db, provider);
+        await saveTrackedTokenBalances(db, provider, WALLET_TO_CHECK);
 
         // 2. Toplam LP Varlığını Hesapla ve Kaydet
         console.log('Calculating total LP assets...');
-        const factory = new ethers.Contract(FACTORY_ADDRESS, FactoryABI.abi, provider);
         const router = new ethers.Contract(ROUTER_ADDRESS, RouterABI.abi, provider);
         const decimalsCache = new Map();
         const priceCacheSimple = new Map();

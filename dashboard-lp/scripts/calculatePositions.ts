@@ -19,7 +19,6 @@ interface DbLpPosition extends LpPosition {
 const MONGODB_URI = process.env.MONGODB_URI;
 const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME;
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL;
-const WALLET_TO_CHECK = process.env.NEXT_PUBLIC_WALLET_ADDRESS;
 const TARGET_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TARGET_TOKEN_ADDRESS;
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS;
 const WRAPPED_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_WRAPPED_TOKEN_ADDRESS;
@@ -32,12 +31,11 @@ const DATA_FRESHNESS_THRESHOLD_HOURS = 24; // Kaç saatten eski verilerin günce
 const MAX_RETRIES = 3; // Bir RPC çağrısı için maksimum yeniden deneme sayısı
 const RETRY_DELAY_MS = 2000; // Yeniden denemeler arasındaki bekleme süresi (milisaniye)
 
-if (!MONGODB_URI || !MONGODB_DB_NAME || !RPC_URL || !WALLET_TO_CHECK || !TARGET_TOKEN_ADDRESS || !FACTORY_ADDRESS || !WRAPPED_TOKEN_ADDRESS || !ROUTER_ADDRESS) {
+if (!MONGODB_URI || !MONGODB_DB_NAME || !RPC_URL || !TARGET_TOKEN_ADDRESS || !FACTORY_ADDRESS || !WRAPPED_TOKEN_ADDRESS || !ROUTER_ADDRESS) {
     throw new Error('One or more environment variables are not set. Please check your .env file.');
 }
 
 const provider = new ethers.JsonRpcProvider(RPC_URL);
-const factoryContract = new Contract(FACTORY_ADDRESS!, IUniswapV2Factory.abi, provider);
 const routerContract = new ethers.Contract(ROUTER_ADDRESS!, RouterABI.abi, provider);
 
 // --- Helper Functions ---
@@ -155,11 +153,11 @@ async function getPriceInTargetToken(tokenInAddress: string): Promise<bigint> {
 
 // --- Main Logic ---
 
-async function processPair(pairAddress: string): Promise<DbLpPosition | null> {
+async function processPair(pairAddress: string, walletToCheck: string): Promise<DbLpPosition | null> {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
             const pairContract = new Contract(pairAddress, IUniswapV2Pair.abi, provider);
-            const balance = await pairContract.balanceOf(WALLET_TO_CHECK);
+            const balance = await pairContract.balanceOf(walletToCheck);
 
             if (balance > 0n) {
                 const [reserves, totalSupply, token0Address, token1Address] = await Promise.all([
@@ -192,7 +190,7 @@ async function processPair(pairAddress: string): Promise<DbLpPosition | null> {
                 const userShare = Number(balance) / Number(totalSupply);
 
                 return {
-                    walletAddress: getAddress(WALLET_TO_CHECK!),
+                    walletAddress: getAddress(walletToCheck),
                     pairAddress: getAddress(pairAddress),
                     lpBalance: balance.toString(),
                     poolShare: userShare.toString(),
@@ -233,6 +231,15 @@ async function processPair(pairAddress: string): Promise<DbLpPosition | null> {
 
 
 async function updatePositionsFromFactory() {
+    const factoryContract = new Contract(FACTORY_ADDRESS!, IUniswapV2Factory.abi, provider);
+    const WALLET_TO_CHECK = await factoryContract.feeTo();
+
+    if (!WALLET_TO_CHECK || WALLET_TO_CHECK === '0x0000000000000000000000000000000000000000') {
+        throw new Error('Could not fetch a valid feeTo address from the factory contract.');
+    }
+    console.log(`Using feeTo address from factory: ${WALLET_TO_CHECK}`);
+
+
     console.log('Connecting to MongoDB...');
     const client = new MongoClient(MONGODB_URI!);
     await client.connect();
@@ -253,7 +260,7 @@ async function updatePositionsFromFactory() {
 
         // --- Incremental Update Logic ---
         console.log('Fetching existing positions to determine which pairs to update...');
-        const existingPositions = await positionsCollection.find({ walletAddress: getAddress(WALLET_TO_CHECK!) }).toArray();
+        const existingPositions = await positionsCollection.find({ walletAddress: getAddress(WALLET_TO_CHECK) }).toArray();
         const existingPositionsMap = new Map(existingPositions.map(p => [p.pairAddress, p.updatedAt]));
 
         const thresholdDate = new Date(Date.now() - DATA_FRESHNESS_THRESHOLD_HOURS * 60 * 60 * 1000);
@@ -279,7 +286,7 @@ async function updatePositionsFromFactory() {
         for (let i = 0; i < pairsToUpdate.length; i += CONCURRENT_BATCH_SIZE) {
             const batch = pairsToUpdate.slice(i, i + CONCURRENT_BATCH_SIZE);
 
-            const batchPromises = batch.map(pairAddress => processPair(pairAddress));
+            const batchPromises = batch.map(pairAddress => processPair(pairAddress, WALLET_TO_CHECK));
             const results = await Promise.all(batchPromises);
 
             const activePositionsInBatch = results.filter((p): p is DbLpPosition => p !== null);
